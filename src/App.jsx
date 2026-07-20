@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, BarChart, ScatterChart, Scatter, ReferenceLine, Cell, LabelList,
@@ -8,20 +8,15 @@ import {
   PenLine, Users, File as FileIcon, MessageSquare, Settings, ChevronRight,
   ChevronDown, X, Plus, Download, Upload, LogOut, Menu, Sparkles, ExternalLink,
 } from "lucide-react";
+import { hasSupabase, supabase } from "./lib/supabase";
+import * as api from "./lib/api";
+import brazil from "@svg-maps/brazil";
 
 /* ============================ TOKENS DE MARCA ============================ */
 const C = {
-  orange: "#FF5B00",
-  navy: "#05244F",
-  navyMed: "#273A76",
-  blue: "#3C58B4",
-  sidebar: "#071a3a",
-  page: "#f3f5f8",
-  border: "#e6eaf0",
-  green: "#16a34a",
-  amber: "#f59e0b",
-  red: "#dc2626",
-  gray: "#94a3b8",
+  orange: "#FF5B00", navy: "#05244F", navyMed: "#273A76", blue: "#3C58B4",
+  sidebar: "#071a3a", page: "#f3f5f8", border: "#e6eaf0",
+  green: "#16a34a", amber: "#f59e0b", red: "#dc2626", gray: "#94a3b8",
 };
 const STATUS = {
   Finalizada: { c: C.green, label: "Finalizada" },
@@ -30,76 +25,60 @@ const STATUS = {
   Aberta: { c: C.gray, label: "Aberta" },
 };
 const PHASES = ["Diagnóstico", "Estruturação", "Implantação", "Estabilização", "Governança"];
+const ORIGINS = ["Ata", "Visita", "Auditoria", "Reunião", "Balanço"];
 
-/* ============================ DADOS MOCK ============================ */
+/* ============================ DADOS MOCK (fallback) ============================ */
 const PROJECTS = [
-  { id: "iseletrica", name: "Iselétrica", client: "Iselétrica Instalações", city: "Belo Horizonte", uf: "MG", region: "Sudeste", color: C.orange, letter: "I", status: "Não iniciado", acoes: 0, pct: 0, atras: 0, emAnd: 0, portfolios: [["Industrial", 100]] },
-  { id: "metalica", name: "Metálica", client: "Metálica Estruturas", city: "Contagem", uf: "MG", region: "Sudeste", color: C.navy, letter: "M", status: "Ativo", acoes: 23, pct: 70, atras: 5, emAnd: 2, portfolios: [["ACG", 100]] },
-  { id: "matmed", name: "Matmed", client: "Matmed Hospitalar", city: "São Paulo", uf: "SP", region: "Sudeste", color: C.navyMed, letter: "M", status: "Ativo", acoes: 22, pct: 45, atras: 10, emAnd: 2, portfolios: [["Financeiro", 50], ["A&B", 50]] },
-  { id: "condogroup", name: "Condogroup", client: "Condogroup Administração", city: "Rio de Janeiro", uf: "RJ", region: "Sudeste", color: C.green, letter: "C", status: "Ativo", acoes: 17, pct: 41, atras: 10, emAnd: 0, portfolios: [["A&B", 50], ["Pessoas e Cultura", 50]] },
-  { id: "anaju", name: "Anaju", client: "Anaju Alimentos", city: "Goiânia", uf: "GO", region: "Centro-Oeste", color: C.navy, letter: "A", status: "Ativo", acoes: 18, pct: 39, atras: 10, emAnd: 1, portfolios: [["Comercial", 100]] },
-  { id: "gosto", name: "Gosto Mineiro", client: "Gosto Mineiro Laticínios", city: "Uberlândia", uf: "MG", region: "Sudeste", color: C.red, letter: "G", status: "Ativo", acoes: 17, pct: 47, atras: 5, emAnd: 1, portfolios: [["ACG", 50], ["Pessoas e Cultura", 50]] },
-  { id: "tubonord", name: "Tubonord / Tubocone", client: "Tubonord Industrial", city: "Fortaleza", uf: "CE", region: "Nordeste", color: "#06b6d4", letter: "T", status: "Ativo", acoes: 26, pct: 65, atras: 6, emAnd: 2, portfolios: [["Pessoas e Cultura", 100]] },
-  { id: "estacao7", name: "Estação 7", client: "Estação 7 Log", city: "Curitiba", uf: "PR", region: "Sul", color: "#7c3aed", letter: "E", status: "Ativo", acoes: 24, pct: 50, atras: 7, emAnd: 3, portfolios: [["ACG", 100]] },
+  { id: "gosto", name: "Gosto Mineiro", client: "Gosto Mineiro", city: "", uf: "CE", region: "Nordeste", color: C.orange, letter: "G", status: "Ativo", acoes: 0, pct: 0, atras: 0, emAnd: 0, portfolios: [] },
+  { id: "iseletrica", name: "Iselétrica", client: "Iselétrica", city: "", uf: "CE", region: "Nordeste", color: C.navy, letter: "I", status: "Ativo", acoes: 0, pct: 0, atras: 0, emAnd: 0, portfolios: [] },
+  { id: "matmed", name: "Matmed", client: "Matmed", city: "", uf: "CE", region: "Nordeste", color: C.navyMed, letter: "M", status: "Ativo", acoes: 0, pct: 0, atras: 0, emAnd: 0, portfolios: [] },
+  { id: "condogroup", name: "Condogroup", client: "Condogroup", city: "", uf: "CE", region: "Nordeste", color: C.blue, letter: "C", status: "Ativo", acoes: 0, pct: 0, atras: 0, emAnd: 0, portfolios: [] },
+  { id: "anaju", name: "Anaju", client: "Anaju", city: "", uf: "CE", region: "Nordeste", color: C.orange, letter: "A", status: "Ativo", acoes: 0, pct: 0, atras: 0, emAnd: 0, portfolios: [] },
+  { id: "metalica", name: "Metálica", client: "Metálica", city: "", uf: "CE", region: "Nordeste", color: C.navy, letter: "M", status: "Ativo", acoes: 0, pct: 0, atras: 0, emAnd: 0, portfolios: [] },
+  { id: "estacao7", name: "Estação 7", client: "Estação 7", city: "", uf: "CE", region: "Nordeste", color: C.navyMed, letter: "E", status: "Ativo", acoes: 0, pct: 0, atras: 0, emAnd: 0, portfolios: [] },
+  { id: "tubonord", name: "Tubonord", client: "Tubonord", city: "", uf: "PE", region: "Nordeste", color: C.blue, letter: "T", status: "Ativo", acoes: 0, pct: 0, atras: 0, emAnd: 0, portfolios: [] },
 ];
-const PROJ = (id) => PROJECTS.find((p) => p.id === id);
+const PROJ = (id, list = PROJECTS) => list.find((p) => p.id === id) || PROJECTS.find((p) => p.id === id);
 
-// contadores exibidos nos cards do Portfólio (fin, atras, and)
-const PORTFOLIO_COUNTS = {
-  metalica: [16, 5, 2], matmed: [10, 10, 2], condogroup: [7, 10, 0],
-  anaju: [7, 10, 1], gosto: [8, 5, 1], tubonord: [17, 6, 2], estacao7: [12, 7, 3],
+const RESPONSAVEIS = [];
+
+const GOSTO_ACOES = [];
+
+const DOCS = [];
+const SOLICITACOES = [];
+const ATA_EXAMPLE = {
+  data: "17/07/2026", local: "Sede do cliente / Online",
+  participantes: [["Ana Prado", "PWR Gestão"], ["Carlos Nunes", "Gosto Mineiro Laticínios"], ["Marina Lopes", "Gosto Mineiro Laticínios"], ["Rafael Dias", "PWR Gestão"]],
+  pauta: [
+    "Bom dia a todos, vamos iniciar a reunião de acompanhamento.",
+    "A padronização do procedimento de recebimento foi concluída na semana passada.",
+    "Ainda temos pendência no treinamento da equipe do turno da noite.",
+    "Como ponto de atenção, a disponibilidade de dados do ERP ainda está limitada.",
+  ],
+  decisoes: ["Ótimo. Ficou decidido que vamos adotar o novo checklist em todas as unidades.", "Foi aprovado o novo cronograma de manutenção preventiva."],
+  encaminhamentos: [
+    ["Marina ficou de organizar o treinamento da equipe até 30/07/2026.", "Marina Lopes", "30/07/2026"],
+    ["Vou consolidar o relatório gerencial e enviar até 25/07/2026.", "", "25/07/2026"],
+    ["Precisamos revisar o contrato com o fornecedor de embalagens.", "", ""],
+  ],
 };
-
-const RESPONSAVEIS = [
-  { nome: "Ana Prado", empresa: "PWR Gestão", pwr: true, papel: "Consultora", email: "ana.prado@pwrgestao.com", acoes: 5 },
-  { nome: "Carlos Nunes", empresa: "Gosto Mineiro Laticínios", pwr: false, papel: "Diretor", email: "carlos.nunes@gostomineiro.com", acoes: 2 },
-  { nome: "Marina Lopes", empresa: "Gosto Mineiro Laticínios", pwr: false, papel: "Gerente", email: "marina.lopes@gostomineiro.com", acoes: 3 },
-  { nome: "Rafael Dias", empresa: "PWR Gestão", pwr: true, papel: "Consultor", email: "rafael.dias@pwrgestao.com", acoes: 0 },
-  { nome: "Juliana Reis", empresa: "Gosto Mineiro Laticínios", pwr: false, papel: "Coordenadora", email: "juliana.reis@gostomineiro.com", acoes: 5 },
-  { nome: "Bruno Teixeira", empresa: "Gosto Mineiro Laticínios", pwr: false, papel: "Analista", email: "bruno.teixeira@gostomineiro.com", acoes: 2 },
-  { nome: "Patricia Melo", empresa: "Gosto Mineiro Laticínios", pwr: false, papel: "Assistente", email: "patricia.melo@gostomineiro.com", acoes: 1 },
-];
-
-// 17 ações do Gosto Mineiro (transcritas do protótipo)
-const GOSTO_ACOES = [
-  ["GOS-1", "Padronizar procedimento operacional", "Implantação", "Ata", "Marina Lopes", "–", "09/07/25", "–", "Aberta"],
-  ["GOS-2", "Revisar indicadores de produção", "Estabilização", "Visita", "Juliana Reis", "05/05/26", "20/05/26", "08/05/26", "Finalizada"],
-  ["GOS-3", "Implantar rotina de reunião tática", "Estruturação", "Auditoria", "Carlos Nunes", "–", "18/07/26", "01/07/26", "Finalizada"],
-  ["GOS-4", "Mapear fluxo de caixa", "Diagnóstico", "Auditoria", "Marina Lopes", "24/09/25", "01/11/25", "–", "Atrasada"],
-  ["GOS-5", "Treinar equipe no novo processo", "Diagnóstico", "Reunião", "Patricia Melo", "01/08/25", "23/08/25", "21/08/25", "Finalizada"],
-  ["GOS-6", "Definir metas do trimestre", "Implantação", "Balanço", "Juliana Reis", "21/01/26", "11/03/26", "02/03/26", "Finalizada"],
-  ["GOS-7", "Auditar controle de qualidade", "Implantação", "Ata", "Carlos Nunes", "12/09/25", "28/11/25", "10/12/25", "Finalizada"],
-  ["GOS-8", "Ajustar cronograma de manutenção", "Estabilização", "Auditoria", "Bruno Teixeira", "17/10/25", "30/12/25", "–", "Atrasada"],
-  ["GOS-9", "Consolidar relatório gerencial", "Estruturação", "Visita", "Juliana Reis", "–", "12/06/25", "–", "Aberta"],
-  ["GOS-10", "Estruturar gestão à vista", "Implantação", "Balanço", "Ana Prado", "04/03/26", "21/03/26", "08/03/26", "Finalizada"],
-  ["GOS-11", "Revisar contrato de fornecedores", "Implantação", "Balanço", "Ana Prado", "25/07/25", "02/10/25", "–", "Atrasada"],
-  ["GOS-12", "Criar plano de ação 5S", "Estruturação", "Ata", "Ana Prado", "11/06/25", "07/07/25", "21/06/25", "Finalizada"],
-  ["GOS-13", "Documentar instrução de trabalho", "Implantação", "Auditoria", "Ana Prado", "03/04/25", "–", "–", "Em Andamento"],
-  ["GOS-14", "Validar dados do ERP", "Implantação", "Auditoria", "Ana Prado", "16/11/25", "07/01/26", "23/12/25", "Finalizada"],
-  ["GOS-15", "Organizar follow-up semanal", "Estruturação", "Ata", "Bruno Teixeira", "24/01/26", "01/03/26", "–", "Atrasada"],
-  ["GOS-16", "Padronizar procedimento operacional", "Governança", "Ata", "Juliana Reis", "03/03/26", "21/04/26", "–", "Atrasada"],
-  ["GOS-17", "Revisar indicadores de produção", "Governança", "Auditoria", "Juliana Reis", "–", "28/08/25", "–", "Aberta"],
-].map(([id, acao, fase, origem, resp, ab, fp, fr, st]) => ({ id, acao, fase, origem, resp, ab, fp, fr, st }));
-
 const GOSTO_ATA_EXTRA = [
-  { id: "GOS-18", acao: "Marina ficou de organizar o treinamento da equipe até 30/07/2026.", fase: "Implantação", origem: "Ata", resp: "Marina Lopes", ab: "17/07/26", fp: "30/07/26", fr: "–", st: "Aberta" },
-  { id: "GOS-19", acao: "Vou consolidar o relatório gerencial e enviar até 25/07/2026.", fase: "Estruturação", origem: "Ata", resp: "Ana Prado", ab: "17/07/26", fp: "25/07/26", fr: "–", st: "Aberta" },
-  { id: "GOS-20", acao: "Precisamos revisar o contrato com o fornecedor de embalagens.", fase: "Implantação", origem: "Ata", resp: "Carlos Nunes", ab: "17/07/26", fp: "–", fr: "–", st: "Aberta" },
+  { id: "GOS-18", acao: ATA_EXAMPLE.encaminhamentos[0][0], fase: "Implantação", origem: "Ata", resp: "Marina Lopes", ab: "17/07/26", fp: "30/07/26", fr: "–", st: "Aberta" },
+  { id: "GOS-19", acao: ATA_EXAMPLE.encaminhamentos[1][0], fase: "Estruturação", origem: "Ata", resp: "Ana Prado", ab: "17/07/26", fp: "25/07/26", fr: "–", st: "Aberta" },
+  { id: "GOS-20", acao: ATA_EXAMPLE.encaminhamentos[2][0], fase: "Implantação", origem: "Ata", resp: "Carlos Nunes", ab: "17/07/26", fp: "–", fr: "–", st: "Aberta" },
 ];
 
-// gera ações sintéticas p/ projetos sem lista real (para popular dashboards)
 function genActions(p) {
   const fin = Math.round((p.acoes * p.pct) / 100);
   const atras = p.atras, emAnd = p.emAnd;
   const aberta = Math.max(0, p.acoes - fin - atras - emAnd);
   const pool = RESPONSAVEIS.map((r) => r.nome);
   const arr = [];
-  const push = (n, st) => { for (let i = 0; i < n; i++) arr.push({ fase: PHASES[arr.length % PHASES.length], resp: pool[arr.length % pool.length], st }); };
+  const push = (n, st) => { for (let i = 0; i < n; i++) arr.push({ fase: PHASES[arr.length % PHASES.length], resp: pool[arr.length % pool.length], st, id: "", acao: "", origem: "Ata", ab: "–", fp: "–", fr: "–" }); };
   push(fin, "Finalizada"); push(atras, "Atrasada"); push(emAnd, "Em Andamento"); push(aberta, "Aberta");
   return arr;
 }
 
-// KPIs + dados de gráfico a partir de uma lista de ações
 function buildDashboard(actions) {
   const k = { total: actions.length, Finalizada: 0, "Em Andamento": 0, Atrasada: 0, Aberta: 0 };
   actions.forEach((a) => { k[a.st]++; });
@@ -107,7 +86,7 @@ function buildDashboard(actions) {
 
   const atrasoBy = {};
   actions.filter((a) => a.st === "Atrasada").forEach((a) => { atrasoBy[a.resp] = (atrasoBy[a.resp] || 0) + 1; });
-  const paretoRaw = Object.entries(atrasoBy).sort((a, b) => b[1] - a[1]).map(([resp, n]) => ({ resp: resp.split(" ")[0], n }));
+  const paretoRaw = Object.entries(atrasoBy).sort((a, b) => b[1] - a[1]).map(([resp, n]) => ({ resp: (resp || "—").split(" ")[0], n }));
   const tot = paretoRaw.reduce((s, x) => s + x.n, 0) || 1;
   let acc = 0;
   const pareto = paretoRaw.map((x) => { acc += x.n; return { ...x, cum: Math.round((acc / tot) * 100) }; });
@@ -118,25 +97,36 @@ function buildDashboard(actions) {
     return o;
   });
 
-  const respOrder = ["Marina Lopes", "Juliana Reis", "Carlos Nunes", "Patricia Melo", "Bruno Teixeira", "Ana Prado", "Rafael Dias"];
-  const present = respOrder.filter((r) => actions.some((a) => a.resp === r));
-  const byResp = present.map((resp) => {
+  const names = [...new Set(actions.map((a) => a.resp).filter(Boolean))];
+  const byResp = names.map((resp) => {
     const o = { resp: resp.split(" ")[0], Finalizada: 0, "Em Andamento": 0, Atrasada: 0, Aberta: 0 };
     actions.filter((a) => a.resp === resp).forEach((a) => o[a.st]++);
     return o;
   });
 
-  // mapa de calor: X=% prazo decorrido, Y=% executado
+  // alertas: ações vencidas ou a vencer nos próximos 7 dias (não finalizadas)
+  const pd = (s) => { if (!s || s === "–") return null; const [d, m, y] = s.split("/").map(Number); return new Date(y < 100 ? 2000 + y : y, m - 1, d); };
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const semana = new Date(hoje); semana.setDate(semana.getDate() + 7);
+  const vencidas = [], aVencer = [];
+  actions.forEach((a) => {
+    if (a.st === "Finalizada") return;
+    const d = pd(a.fp);
+    if (!d) return;
+    if (d < hoje) vencidas.push(a);
+    else if (d <= semana) aVencer.push(a);
+  });
+
   const execByPhase = { "Diagnóstico": 50, "Estruturação": 50, "Implantação": 57, "Estabilização": 50, "Governança": 0 };
   const elapsedByPhase = { "Diagnóstico": 96, "Estruturação": 92, "Implantação": 90, "Estabilização": 86, "Governança": 42 };
-  const heat = PHASES.filter((f) => byPhase.find((b) => b.fase === f).Finalizada + byPhase.find((b) => b.fase === f).Atrasada + byPhase.find((b) => b.fase === f)["Em Andamento"] + byPhase.find((b) => b.fase === f).Aberta > 0)
+  const heat = PHASES.filter((f) => { const b = byPhase.find((x) => x.fase === f); return b.Finalizada + b.Atrasada + b["Em Andamento"] + b.Aberta > 0; })
     .map((f) => {
       const x = elapsedByPhase[f], y = execByPhase[f];
       const color = y >= x - 3 ? C.green : y >= x - 18 ? C.amber : C.red;
       return { fase: f, x, y, color, label: `${f} ${y}%` };
     });
 
-  return { kpis: { total: k.total, fin: k.Finalizada, emAnd: k["Em Andamento"], atras: k.Atrasada, aberta: k.Aberta, pct }, pareto, byPhase, byResp, heat };
+  return { kpis: { total: k.total, fin: k.Finalizada, emAnd: k["Em Andamento"], atras: k.Atrasada, aberta: k.Aberta, pct }, pareto, byPhase, byResp, heat, alerts: { vencidas, aVencer } };
 }
 
 const GANTT = [
@@ -193,33 +183,6 @@ const KANBAN = {
 };
 const KANBAN_COUNTS = { Aberta: 6, "Em Andamento": 11, Atrasada: 53, Finalizada: 77 };
 
-const DOCS = [
-  { tipo: "Kickoff", data: "01/04/25", nome: "Kickoff – Gosto Mineiro" },
-  { tipo: "Proposta", data: "17/03/25", nome: "Proposta comercial" },
-  { tipo: "Relatório", data: "23/06/26", nome: "Relatório mensal" },
-];
-const SOLICITACOES = [
-  { data: "10/07/26", quem: "carlos@condogroup.com", tipo: "Correção de dados", proj: "Condogroup", desc: "A ação CON-4 está com responsável errado.", st: "Aberta" },
-  { data: "08/07/26", quem: "marina@matmed.com", tipo: "Dúvida", proj: "Matmed", desc: "Como registro horas de impacto retroativas?", st: "Aberta" },
-  { data: "03/07/26", quem: "diego@pwrgestao.com", tipo: "Novo projeto", proj: "—", desc: "Solicitar abertura de projeto para novo cliente do Sul.", st: "Em análise" },
-];
-const ATA_EXAMPLE = {
-  data: "17/07/2026", local: "Sede do cliente / Online",
-  participantes: [["Ana Prado", "PWR Gestão"], ["Carlos Nunes", "Gosto Mineiro Laticínios"], ["Marina Lopes", "Gosto Mineiro Laticínios"], ["Rafael Dias", "PWR Gestão"]],
-  pauta: [
-    "Bom dia a todos, vamos iniciar a reunião de acompanhamento.",
-    "A padronização do procedimento de recebimento foi concluída na semana passada.",
-    "Ainda temos pendência no treinamento da equipe do turno da noite.",
-    "Como ponto de atenção, a disponibilidade de dados do ERP ainda está limitada.",
-  ],
-  decisoes: ["Ótimo. Ficou decidido que vamos adotar o novo checklist em todas as unidades.", "Foi aprovado o novo cronograma de manutenção preventiva."],
-  encaminhamentos: [
-    ["Marina ficou de organizar o treinamento da equipe até 30/07/2026.", "Marina Lopes", "30/07/2026"],
-    ["Vou consolidar o relatório gerencial e enviar até 25/07/2026.", "", "25/07/2026"],
-    ["Precisamos revisar o contrato com o fornecedor de embalagens.", "", ""],
-  ],
-};
-
 /* ============================ MENU POR PAPEL ============================ */
 const NAV = [
   { id: "portfolio", label: "Portfólio", icon: LayoutGrid, level: "portfolio" },
@@ -227,7 +190,7 @@ const NAV = [
   { id: "dashboard", label: "Dashboard", icon: BarChart3, level: "project" },
   { id: "gantt", label: "Fases & Gantt", icon: AlignLeft, level: "project" },
   { id: "acoes", label: "Base de Ações", icon: ListChecks, level: "project", badge: "acoes" },
-  { id: "kanban", label: "Kanban", icon: Columns3, level: "portfolio" },
+  { id: "kanban", label: "Kanban", icon: Columns3, level: "project" },
   { id: "followup", label: "Follow-Up", icon: FileText, level: "project" },
   { id: "ata", label: "Emissão de ATA", icon: PenLine, level: "project" },
   { id: "responsaveis", label: "Responsáveis", icon: Users, level: "project" },
@@ -245,8 +208,8 @@ const ROLE_LABEL = { admin: "Admin PWR", consultor: "Consultor", cliente: "Clien
 /* ============================ UI HELPERS ============================ */
 const ProjIcon = ({ p, size = 28 }) => (
   <div style={{ width: size, height: size, background: p.color }}
-    className="rounded-md flex items-center justify-center text-white font-bold shrink-0"
-    ><span style={{ fontSize: size * 0.5 }}>{p.letter}</span></div>
+    className="rounded-md flex items-center justify-center text-white font-bold shrink-0">
+    <span style={{ fontSize: size * 0.5 }}>{p.letter}</span></div>
 );
 const StatusBadge = ({ st }) => {
   const s = STATUS[st] || STATUS.Aberta;
@@ -258,23 +221,46 @@ const StatusBadge = ({ st }) => {
   );
 };
 const OriginPill = ({ o }) => (
-  <span className="inline-block px-2.5 py-0.5 rounded-full border text-[11px] font-medium"
-    style={{ borderColor: C.border, color: C.navyMed }}>{o}</span>
+  <span className="inline-block px-2.5 py-0.5 rounded-full border text-[11px] font-medium" style={{ borderColor: C.border, color: C.navyMed }}>{o}</span>
 );
 const StatCard = ({ value, label, accent }) => (
-  <div className="bg-white rounded-lg border px-4 py-3 flex-1 min-w-[120px] relative overflow-hidden"
-    style={{ borderColor: C.border }}>
+  <div className="bg-white rounded-lg border px-4 py-3 flex-1 min-w-[120px] relative overflow-hidden" style={{ borderColor: C.border }}>
     <div className="absolute left-0 top-0 bottom-0 w-1" style={{ background: accent }} />
     <div className="text-2xl font-extrabold" style={{ color: C.navy }}>{value}</div>
     <div className="text-[11px] font-semibold tracking-wide mt-0.5" style={{ color: C.gray }}>{label}</div>
   </div>
 );
+function AlertPanel({ color, title, items, empty }) {
+  return (
+    <div className="bg-white rounded-lg border overflow-hidden" style={{ borderColor: C.border }}>
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b" style={{ borderColor: C.border }}>
+        <span className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />
+        <span className="font-bold text-sm" style={{ color: C.navy }}>{title}</span>
+        <span className="ml-auto text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: color, color: "#fff" }}>{items.length}</span>
+      </div>
+      <div className="p-2">
+        {items.length === 0 ? (
+          <div className="text-xs px-2 py-3" style={{ color: C.gray }}>{empty}</div>
+        ) : (
+          items.slice(0, 6).map((a, i) => (
+            <div key={a.id || i} className="flex items-center gap-2 px-2 py-1.5 text-[13px] border-b last:border-b-0" style={{ borderColor: C.border }}>
+              <span className="font-semibold shrink-0" style={{ color: C.blue }}>{a.id || "—"}</span>
+              <span className="flex-1 truncate" style={{ color: C.navy }}>{a.acao || "—"}</span>
+              <span className="shrink-0 hidden sm:inline" style={{ color: C.gray }}>{(a.resp || "").split(" ")[0]}</span>
+              <span className="font-semibold shrink-0" style={{ color }}>{a.fp}</span>
+            </div>
+          ))
+        )}
+        {items.length > 6 && <div className="text-[11px] px-2 pt-1.5" style={{ color: C.gray }}>+{items.length - 6} outras</div>}
+      </div>
+    </div>
+  );
+}
 
 /* ============================ SIDEBAR ============================ */
-function Sidebar({ role, page, setPage, project, ataAdded }) {
+function Sidebar({ role, page, setPage, acoesCount }) {
   const pages = ROLE_PAGES[role];
   const items = NAV.filter((n) => pages.includes(n.id));
-  const acoesBadge = project ? (project.id === "gosto" ? (ataAdded ? 20 : 17) : project.acoes) : 17;
   return (
     <aside className="w-[224px] shrink-0 flex flex-col text-white" style={{ background: C.sidebar }}>
       <div className="px-5 py-4 flex items-center gap-2.5 border-b" style={{ borderColor: "#ffffff14" }}>
@@ -296,7 +282,7 @@ function Sidebar({ role, page, setPage, project, ataAdded }) {
               style={{ background: active ? C.orange : "transparent", color: active ? "#fff" : "#c7d2e6", fontWeight: active ? 700 : 500 }}>
               <Ico size={18} />
               <span className="flex-1 text-left">{n.label}</span>
-              {n.badge === "acoes" && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: active ? "#ffffff33" : "#ffffff1a", color: "#fff" }}>{acoesBadge}</span>}
+              {n.badge === "acoes" && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: active ? "#ffffff33" : "#ffffff1a", color: "#fff" }}>{acoesCount}</span>}
               {n.badge3 && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: active ? "#ffffff33" : "#ffffff1a", color: "#fff" }}>3</span>}
             </button>
           );
@@ -307,7 +293,22 @@ function Sidebar({ role, page, setPage, project, ataAdded }) {
 }
 
 /* ============================ TOPBAR ============================ */
-function TopBar({ role, setRole, page, project, openProjectPicker, onLogout }) {
+function DbBadge({ status }) {
+  const map = {
+    checking: [C.gray, "Verificando banco…"],
+    online: [C.green, "Banco conectado"],
+    demo: [C.gray, "Modo demo"],
+    error: [C.red, "Banco com erro"],
+  };
+  const [c, label] = map[status] || map.demo;
+  return (
+    <span className="hidden sm:inline-flex items-center gap-1.5 border rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ borderColor: C.border, color: c }}>
+      <span className="w-2 h-2 rounded-full" style={{ background: c }} />{label}
+    </span>
+  );
+}
+
+function TopBar({ role, setRole, page, project, openProjectPicker, onLogout, dbStatus, canSwitchRole }) {
   const isProjectLevel = NAV.find((n) => n.id === page)?.level === "project";
   const title = NAV.find((n) => n.id === page)?.label || "";
   const crumbProj = isProjectLevel && project ? project.name : "PWR Gestão";
@@ -319,25 +320,27 @@ function TopBar({ role, setRole, page, project, openProjectPicker, onLogout }) {
         <div className="text-lg font-extrabold" style={{ color: C.navy }}>{title}</div>
       </div>
       <div className="ml-auto flex items-center gap-3">
-        {isProjectLevel && project && (
-          <button onClick={openProjectPicker}
-            className="flex items-center gap-2 border rounded-md px-3 py-1.5 text-sm font-bold"
-            style={{ borderColor: C.border, color: C.navy }}>
+        <DbBadge status={dbStatus} />
+        {isProjectLevel && project && role !== "cliente" && (
+          <button onClick={openProjectPicker} className="flex items-center gap-2 border rounded-md px-3 py-1.5 text-sm font-bold" style={{ borderColor: C.border, color: C.navy }}>
             <ProjIcon p={project} size={20} /> {project.name} <ChevronDown size={14} />
           </button>
         )}
-        {role === "cliente" ? (
-          <button onClick={() => setRole("admin")} className="border rounded-md px-3 py-1.5 text-sm font-semibold" style={{ borderColor: C.border, color: C.navy }}>Acesso Cliente</button>
-        ) : (
-          <div className="flex items-center rounded-md p-0.5 gap-0.5" style={{ background: "#eef1f6" }}>
-            {["admin", "consultor", "cliente"].map((r) => (
-              <button key={r} onClick={() => setRole(r)}
-                className="px-3 py-1 rounded text-sm transition-all"
-                style={{ background: role === r ? "#fff" : "transparent", color: role === r ? C.navy : C.gray, fontWeight: role === r ? 700 : 500, boxShadow: role === r ? "0 1px 2px #0001" : "none" }}>
-                {ROLE_LABEL[r]}
-              </button>
-            ))}
+        {canSwitchRole ? (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-semibold hidden md:inline" style={{ color: C.gray }}>PAPEL</span>
+            <div className="relative">
+              <select value={role} onChange={(e) => setRole(e.target.value)}
+                className="appearance-none border rounded-md pl-3 pr-8 py-1.5 text-sm font-bold bg-white cursor-pointer" style={{ borderColor: C.border, color: C.navy }}>
+                <option value="admin">Admin PWR</option>
+                <option value="consultor">Consultor</option>
+                <option value="cliente">Cliente</option>
+              </select>
+              <ChevronDown size={14} color={C.gray} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
           </div>
+        ) : (
+          <span className="text-sm font-bold px-3 py-1.5 rounded-md" style={{ background: "#eef1f6", color: C.navy }}>{ROLE_LABEL[role]}</span>
         )}
         <button onClick={onLogout} className="w-8 h-8 rounded-full border flex items-center justify-center" style={{ borderColor: C.border }} title="Sair">
           <LogOut size={14} color={C.gray} />
@@ -360,25 +363,28 @@ function PageHeader({ title, subtitle, right }) {
   );
 }
 
-function Portfolio({ openProject }) {
-  const totals = { proj: 8, ativos: 7, acoes: 147, fin: 77, atras: 53, pct: 52 };
+function Portfolio({ projetos, openProject }) {
+  const ativos = projetos.filter((p) => p.status === "Ativo").length;
+  const totacoes = projetos.reduce((s, p) => s + (p.acoes || 0), 0);
+  const totfin = projetos.reduce((s, p) => s + Math.round((p.acoes * p.pct) / 100), 0);
+  const totatras = projetos.reduce((s, p) => s + (p.atras || 0), 0);
+  const media = ativos ? Math.round(projetos.filter((p) => p.status === "Ativo").reduce((s, p) => s + p.pct, 0) / ativos) : 0;
   return (
     <div>
-      <PageHeader title="Portfólio PWR" subtitle="8 projetos de consultoria · 7 ativos" />
+      <PageHeader title="Portfólio PWR" subtitle={`${projetos.length} projetos de consultoria · ${ativos} ativos`} />
       <div className="flex gap-3 flex-wrap mb-5">
-        <StatCard value={totals.proj} label="PROJETOS" accent={C.navy} />
-        <StatCard value={totals.ativos} label="ATIVOS" accent={C.navy} />
-        <StatCard value={totals.acoes} label="AÇÕES" accent={C.navy} />
-        <StatCard value={totals.fin} label="FINALIZADAS" accent={C.green} />
-        <StatCard value={totals.atras} label="ATRASADAS" accent={C.red} />
-        <StatCard value={`${totals.pct}%`} label="CONCLUÍDO" accent={C.orange} />
+        <StatCard value={projetos.length} label="PROJETOS" accent={C.navy} />
+        <StatCard value={ativos} label="ATIVOS" accent={C.navy} />
+        <StatCard value={totacoes} label="AÇÕES" accent={C.navy} />
+        <StatCard value={totfin} label="FINALIZADAS" accent={C.green} />
+        <StatCard value={totatras} label="ATRASADAS" accent={C.red} />
+        <StatCard value={`${media}%`} label="CONCLUÍDO" accent={C.orange} />
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        {PROJECTS.map((p) => {
-          const counts = PORTFOLIO_COUNTS[p.id];
+        {projetos.map((p) => {
+          const fin = Math.round((p.acoes * p.pct) / 100);
           return (
-            <button key={p.id} onClick={() => openProject(p)}
-              className="bg-white rounded-lg border p-4 text-left hover:shadow-md transition-shadow" style={{ borderColor: C.border }}>
+            <button key={p.id} onClick={() => openProject(p)} className="bg-white rounded-lg border p-4 text-left hover:shadow-md transition-shadow" style={{ borderColor: C.border }}>
               <div className="flex items-center gap-2.5 mb-3">
                 <ProjIcon p={p} size={26} />
                 <div className="leading-tight">
@@ -396,9 +402,9 @@ function Portfolio({ openProject }) {
                     </div>
                   </div>
                   <div className="flex gap-1.5 flex-wrap">
-                    <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: "#dcfce7", color: C.green }}>{counts[0]} fin.</span>
-                    <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: "#fee2e2", color: C.red }}>{counts[1]} atras.</span>
-                    <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: "#fef3c7", color: "#b45309" }}>{counts[2]} and.</span>
+                    <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: "#dcfce7", color: C.green }}>{fin} fin.</span>
+                    <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: "#fee2e2", color: C.red }}>{p.atras} atras.</span>
+                    <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: "#fef3c7", color: "#b45309" }}>{p.emAnd} and.</span>
                   </div>
                 </>
               )}
@@ -410,58 +416,56 @@ function Portfolio({ openProject }) {
   );
 }
 
-function MapaBrasil({ openProject }) {
-  // grid 8 linhas x 6 colunas (posições aproximadas do protótipo)
-  const cells = {
-    RR: [1, 4], AP: [1, 5],
-    AM: [2, 2], PA: [2, 3], MA: [2, 4], CE: [2, 5], RN: [2, 6],
-    AC: [3, 1], RO: [3, 2], TO: [3, 3], PI: [3, 4], PE: [3, 5], PB: [3, 6],
-    MT: [4, 2], GO: [4, 3], BA: [4, 4], SE: [4, 5], AL: [4, 6],
-    MS: [5, 2], DF: [5, 3], MG: [5, 4], ES: [5, 5],
-    SP: [6, 3], RJ: [6, 4],
-    PR: [7, 3], SC: [7, 4],
-    RS: [8, 3],
-  };
+function MapaBrasil({ projetos, openProject }) {
+  const [hover, setHover] = useState(null);
   const byUf = {};
-  PROJECTS.forEach((p) => { byUf[p.uf] = (byUf[p.uf] || 0) + 1; });
-  const regions = [
-    ["Sudeste", PROJECTS.filter((p) => p.region === "Sudeste")],
-    ["Centro-Oeste", PROJECTS.filter((p) => p.region === "Centro-Oeste")],
-    ["Nordeste", PROJECTS.filter((p) => p.region === "Nordeste")],
-    ["Sul", PROJECTS.filter((p) => p.region === "Sul")],
-  ];
+  projetos.forEach((p) => { const k = (p.uf || "").toLowerCase(); byUf[k] = (byUf[k] || 0) + 1; });
+  const regions = ["Nordeste", "Sudeste", "Sul", "Centro-Oeste", "Norte"]
+    .map((r) => [r, projetos.filter((p) => p.region === r)]).filter(([, l]) => l.length);
+  const estados = projetos.length;
   return (
     <div>
-      <PageHeader title="Mapa de Projetos" subtitle="Distribuição geográfica dos projetos ativos por região" />
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4">
-        <div className="bg-white rounded-lg border p-6" style={{ borderColor: C.border }}>
-          <div className="grid gap-1.5 mx-auto w-fit" style={{ gridTemplateColumns: "repeat(6, 42px)", gridTemplateRows: "repeat(8, 42px)" }}>
-            {Object.entries(cells).map(([uf, [r, c]]) => {
-              const n = byUf[uf] || 0;
+      <PageHeader title="Mapa de Projetos" subtitle="Distribuição geográfica dos projetos pelo Brasil" />
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4">
+        <div className="bg-white rounded-lg border p-4 relative" style={{ borderColor: C.border }}>
+          <svg viewBox={brazil.viewBox} className="w-full" style={{ maxHeight: 520 }} role="img" aria-label="Mapa do Brasil">
+            {brazil.locations.map((loc) => {
+              const n = byUf[loc.id] || 0;
               const active = n > 0;
+              const hovered = hover && hover.id === loc.id;
               return (
-                <div key={uf} style={{ gridRow: r, gridColumn: c, background: active ? C.orange : "#e2e8f0", color: active ? "#fff" : "#94a3b8" }}
-                  className="rounded-md flex flex-col items-center justify-center text-[10px] font-bold">
-                  {uf}
-                  {active && <span className="text-[8px] font-medium opacity-90">{n}proj</span>}
-                </div>
+                <path key={loc.id} d={loc.path}
+                  fill={active ? C.orange : "#e5e9f0"} fillOpacity={hovered ? 0.85 : 1}
+                  stroke="#ffffff" strokeWidth={0.8}
+                  style={{ cursor: active ? "pointer" : "default", transition: "fill-opacity .15s" }}
+                  onMouseEnter={() => setHover({ id: loc.id, name: loc.name, n })}
+                  onMouseLeave={() => setHover(null)} />
               );
             })}
-          </div>
-          <div className="flex gap-5 justify-center mt-6 text-xs" style={{ color: C.gray }}>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: C.orange }} /> Ativo</span>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-slate-300" /> Não iniciado</span>
+          </svg>
+          {hover && (
+            <div className="absolute top-4 right-4 bg-white border rounded-md px-3 py-2 shadow-sm text-sm" style={{ borderColor: C.border }}>
+              <span className="font-bold" style={{ color: C.navy }}>{hover.name}</span>
+              <span className="ml-2" style={{ color: hover.n ? C.orange : C.gray }}>{hover.n ? `${hover.n} projeto(s)` : "sem projetos"}</span>
+            </div>
+          )}
+          <div className="flex gap-5 justify-center mt-3 text-xs" style={{ color: C.gray }}>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded" style={{ background: C.orange }} /> Com projetos</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded" style={{ background: "#e5e9f0" }} /> Sem projetos</span>
           </div>
         </div>
         <div className="bg-white rounded-lg border p-5" style={{ borderColor: C.border }}>
           <div className="font-bold" style={{ color: C.navy }}>Por região</div>
-          <p className="text-xs mb-4" style={{ color: C.gray }}>Clique num ponto do mapa para abrir o projeto</p>
+          <p className="text-xs mb-4" style={{ color: C.gray }}>{estados} projeto(s) · clique para abrir</p>
+          {regions.length === 0 && <div className="text-sm" style={{ color: C.gray }}>Nenhum projeto cadastrado ainda.</div>}
           {regions.map(([name, list]) => (
             <div key={name} className="mb-4">
               <div className="text-sm font-bold mb-2" style={{ color: C.navy }}>{name}<span className="font-normal ml-1 text-xs" style={{ color: C.gray }}>{list.length} proj.</span></div>
               <div className="flex flex-wrap gap-2">
                 {list.map((p) => (
-                  <button key={p.id} onClick={() => openProject(p)} className="border rounded-md px-3 py-1.5 text-xs font-semibold hover:bg-slate-50" style={{ borderColor: C.border, color: C.navy }}>{p.name}</button>
+                  <button key={p.id} onClick={() => openProject(p)} className="flex items-center gap-1.5 border rounded-md px-3 py-1.5 text-xs font-semibold hover:bg-slate-50" style={{ borderColor: C.border, color: C.navy }}>
+                    <span className="w-2 h-2 rounded-full" style={{ background: p.color }} />{p.name} <span style={{ color: C.gray }}>{p.uf}</span>
+                  </button>
                 ))}
               </div>
             </div>
@@ -473,7 +477,7 @@ function MapaBrasil({ openProject }) {
 }
 
 function Dashboard({ data }) {
-  const { kpis, pareto, byPhase, byResp, heat } = data;
+  const { kpis, pareto, byPhase, byResp, heat, alerts } = data;
   const legend = (
     <div className="flex gap-4 text-xs mt-2" style={{ color: C.gray }}>
       {[["Finalizada", C.green], ["Em Andamento", C.amber], ["Atrasada", C.red], ["Aberta", C.gray]].map(([l, c]) => (
@@ -494,9 +498,7 @@ function Dashboard({ data }) {
         {[["FASE", ["Todas", ...PHASES]], ["RESPONSÁVEL", ["Todas"]], ["STATUS", ["Todos"]], ["ORIGEM", ["Todas"]]].map(([lbl, opts]) => (
           <div key={lbl}>
             <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>{lbl}</div>
-            <select className="border rounded-md px-3 py-1.5 text-sm bg-white" style={{ borderColor: C.border, color: C.navy }}>
-              {opts.map((o) => <option key={o}>{o}</option>)}
-            </select>
+            <select className="border rounded-md px-3 py-1.5 text-sm bg-white" style={{ borderColor: C.border, color: C.navy }}>{opts.map((o) => <option key={o}>{o}</option>)}</select>
           </div>
         ))}
       </div>
@@ -508,8 +510,12 @@ function Dashboard({ data }) {
         <StatCard value={kpis.aberta} label="ABERTAS" accent={C.gray} />
         <StatCard value={`${kpis.pct}%`} label="CONCLUÍDO" accent={C.orange} />
       </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <AlertPanel color={C.red} title="Ações vencidas" items={alerts.vencidas} empty="Nenhuma ação vencida 🎉" />
+        <AlertPanel color={C.amber} title="A vencer esta semana" items={alerts.aVencer} empty="Nada vencendo nos próximos 7 dias" />
+      </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Panel title="Pareto de atrasos por responsável" sub="Barras = nº de ações atrasadas · linha laranja = % acumulado">
+        <Panel title="Pareto de atrasos por responsável" sub="Barras = ações atrasadas · linha = % acumulado">
           <ResponsiveContainer width="100%" height={260}>
             <ComposedChart data={pareto} margin={{ top: 20, right: 40, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eef1f6" />
@@ -539,12 +545,12 @@ function Dashboard({ data }) {
           </ResponsiveContainer>
           {legend}
         </Panel>
-        <Panel title="Mapa de Calor por fase" sub="X = % do prazo decorrido · Y = % executado · acima da diagonal = adiantado · use o filtro Fase acima">
+        <Panel title="Mapa de Calor por fase" sub="X = % do prazo decorrido · Y = % executado">
           <div className="relative" style={{ height: 260 }}>
             <div className="absolute inset-0 rounded" style={{ margin: "10px 10px 30px 40px", background: "linear-gradient(135deg,#dcfce7 0%,#fef9c3 50%,#fee2e2 100%)" }} />
             <ResponsiveContainer width="100%" height="100%">
               <ScatterChart margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-                <XAxis type="number" dataKey="x" domain={[0, 100]} tick={{ fontSize: 10, fill: C.gray }} tickFormatter={(v) => `${v}`} label={{ value: "% do prazo decorrido →", position: "insideBottom", offset: -8, fontSize: 10, fill: C.gray }} />
+                <XAxis type="number" dataKey="x" domain={[0, 100]} tick={{ fontSize: 10, fill: C.gray }} label={{ value: "% do prazo decorrido →", position: "insideBottom", offset: -8, fontSize: 10, fill: C.gray }} />
                 <YAxis type="number" dataKey="y" domain={[0, 100]} tick={{ fontSize: 10, fill: C.gray }} width={30} />
                 <ReferenceLine segment={[{ x: 0, y: 0 }, { x: 100, y: 100 }]} stroke="#334155" strokeDasharray="5 4" />
                 <Scatter data={heat}>
@@ -553,8 +559,6 @@ function Dashboard({ data }) {
                 </Scatter>
               </ScatterChart>
             </ResponsiveContainer>
-            <div className="absolute top-3 right-4 text-[9px] font-bold" style={{ color: C.green }}>ADIANTADO</div>
-            <div className="absolute bottom-9 left-11 text-[9px] font-bold" style={{ color: C.red }}>ATRASADO</div>
           </div>
           <div className="flex gap-4 text-xs mt-1" style={{ color: C.gray }}>
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: C.green }} />Adiantado</span>
@@ -562,7 +566,7 @@ function Dashboard({ data }) {
             <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: C.red }} />Atrasado</span>
           </div>
         </Panel>
-        <Panel title="Ações por responsável" sub="Empilhado por status · clique na legenda para ligar/desligar séries">
+        <Panel title="Ações por responsável" sub="Empilhado por status">
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={byResp} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eef1f6" />
@@ -623,15 +627,24 @@ function Gantt({ project }) {
   );
 }
 
-function BaseAcoes({ project, actions }) {
+function BaseAcoes({ project, actions, responsaveis, onCreate }) {
   const [f, setF] = useState({ fase: "Todas", resp: "Todas", st: "Todos", origem: "Todas" });
-  const resps = [...new Set(actions.map((a) => a.resp))];
-  const origens = [...new Set(actions.map((a) => a.origem))];
+  const [modal, setModal] = useState(false);
+  const [form, setForm] = useState({ descricao: "", fase: "Diagnóstico", origem: "Ata", resp: "", ab: "", fp: "", st: "Aberta" });
+  const [saving, setSaving] = useState(false);
+  const resps = [...new Set(actions.map((a) => a.resp).filter(Boolean))];
+  const origens = [...new Set(actions.map((a) => a.origem).filter(Boolean))];
   const filtered = actions.filter((a) =>
-    (f.fase === "Todas" || a.fase === f.fase) &&
-    (f.resp === "Todas" || a.resp === f.resp) &&
-    (f.st === "Todos" || a.st === f.st) &&
-    (f.origem === "Todas" || a.origem === f.origem));
+    (f.fase === "Todas" || a.fase === f.fase) && (f.resp === "Todas" || a.resp === f.resp) &&
+    (f.st === "Todos" || a.st === f.st) && (f.origem === "Todas" || a.origem === f.origem));
+
+  const salvar = async () => {
+    if (!form.descricao.trim()) return;
+    setSaving(true);
+    await onCreate(form);
+    setSaving(false); setModal(false);
+    setForm({ descricao: "", fase: "Diagnóstico", origem: "Ata", resp: "", ab: "", fp: "", st: "Aberta" });
+  };
   const Sel = ({ k, label, opts }) => (
     <div>
       <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>{label}</div>
@@ -640,14 +653,15 @@ function BaseAcoes({ project, actions }) {
       </select>
     </div>
   );
+  const inp = "border rounded-md px-3 py-2 text-sm w-full";
   return (
     <div>
-      <PageHeader title={`Base de Ações — ${project.name}`} subtitle={`${filtered.length} de ${actions.length} ações · status calculado automaticamente`}
+      <PageHeader title={`Base de Ações — ${project.name}`} subtitle={`${filtered.length} de ${actions.length} ações`}
         right={
           <div className="flex gap-2">
             <button className="border rounded-md px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5" style={{ borderColor: C.border, color: C.navy }}><Download size={14} /> Exportar CSV</button>
             <button className="border rounded-md px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5" style={{ borderColor: C.border, color: C.navy }}><Upload size={14} /> Importar GSB</button>
-            <button className="rounded-md px-3 py-1.5 text-sm font-bold text-white flex items-center gap-1.5" style={{ background: C.orange }}><Plus size={14} /> Nova ação</button>
+            <button onClick={() => setModal(true)} className="rounded-md px-3 py-1.5 text-sm font-bold text-white flex items-center gap-1.5" style={{ background: C.orange }}><Plus size={14} /> Nova ação</button>
           </div>
         } />
       <div className="flex gap-3 items-end mb-4 flex-wrap">
@@ -665,13 +679,13 @@ function BaseAcoes({ project, actions }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((a) => (
-              <tr key={a.id} className="border-t" style={{ borderColor: C.border }}>
-                <td className="px-4 py-3 font-semibold" style={{ color: C.blue }}>{a.id}</td>
-                <td className="px-4 py-3 font-semibold" style={{ color: C.navy }}>{a.acao}</td>
+            {filtered.map((a, i) => (
+              <tr key={a.id || i} className="border-t" style={{ borderColor: C.border }}>
+                <td className="px-4 py-3 font-semibold" style={{ color: C.blue }}>{a.id || "—"}</td>
+                <td className="px-4 py-3 font-semibold" style={{ color: C.navy }}>{a.acao || "—"}</td>
                 <td className="px-4 py-3" style={{ color: C.gray }}>{a.fase}</td>
-                <td className="px-4 py-3"><OriginPill o={a.origem} /></td>
-                <td className="px-4 py-3" style={{ color: C.navyMed }}>{a.resp}</td>
+                <td className="px-4 py-3">{a.origem ? <OriginPill o={a.origem} /> : null}</td>
+                <td className="px-4 py-3" style={{ color: C.navyMed }}>{a.resp || "—"}</td>
                 <td className="px-4 py-3" style={{ color: C.gray }}>{a.ab}</td>
                 <td className="px-4 py-3" style={{ color: C.gray }}>{a.fp}</td>
                 <td className="px-4 py-3" style={{ color: C.gray }}>{a.fr}</td>
@@ -681,22 +695,55 @@ function BaseAcoes({ project, actions }) {
           </tbody>
         </table>
       </div>
+      {modal && (
+        <Modal title={`Nova ação — ${project.name}`} onClose={() => setModal(false)}>
+          <div className="mb-3"><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>AÇÃO</div>
+            <input value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Descreva a ação" className={inp} style={{ borderColor: C.border }} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>FASE</div>
+              <select value={form.fase} onChange={(e) => setForm({ ...form, fase: e.target.value })} className={`${inp} bg-white`} style={{ borderColor: C.border }}>{PHASES.map((o) => <option key={o}>{o}</option>)}</select></div>
+            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>ORIGEM</div>
+              <select value={form.origem} onChange={(e) => setForm({ ...form, origem: e.target.value })} className={`${inp} bg-white`} style={{ borderColor: C.border }}>{ORIGINS.map((o) => <option key={o}>{o}</option>)}</select></div>
+          </div>
+          <div className="mt-3"><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>RESPONSÁVEL</div>
+            <select value={form.resp} onChange={(e) => setForm({ ...form, resp: e.target.value })} className={`${inp} bg-white`} style={{ borderColor: C.border }}>
+              <option value="">Selecione</option>{responsaveis.map((r) => <option key={r.email || r.nome}>{r.nome}</option>)}
+            </select></div>
+          <div className="grid grid-cols-3 gap-3 mt-3">
+            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>ABERTURA</div><input value={form.ab} onChange={(e) => setForm({ ...form, ab: e.target.value })} placeholder="dd/mm/aaaa" className={inp} style={{ borderColor: C.border }} /></div>
+            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>FECH. PLAN.</div><input value={form.fp} onChange={(e) => setForm({ ...form, fp: e.target.value })} placeholder="dd/mm/aaaa" className={inp} style={{ borderColor: C.border }} /></div>
+            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>STATUS</div>
+              <select value={form.st} onChange={(e) => setForm({ ...form, st: e.target.value })} className={`${inp} bg-white`} style={{ borderColor: C.border }}>{Object.keys(STATUS).map((o) => <option key={o}>{o}</option>)}</select></div>
+          </div>
+          <div className="flex gap-2 mt-4">
+            <button onClick={salvar} disabled={saving} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{saving ? "Salvando…" : "Salvar ação"}</button>
+            <button onClick={() => setModal(false)} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
 
-function Kanban() {
+function Kanban({ project, actions }) {
   const cols = ["Aberta", "Em Andamento", "Atrasada", "Finalizada"];
+  const [resp, setResp] = useState("Todos");
+  const resps = [...new Set(actions.map((a) => a.resp).filter(Boolean))];
+  const list = actions.filter((a) => resp === "Todos" || a.resp === resp);
+  const grouped = { Aberta: [], "Em Andamento": [], Atrasada: [], Finalizada: [] };
+  list.forEach((a) => { (grouped[a.st] || grouped.Aberta).push(a); });
   return (
     <div>
-      <PageHeader title="Kanban de Ações" subtitle="Todas as suas ações em todos os projetos · filtre por projeto, empresa e responsável · arraste os cards entre colunas" />
+      <PageHeader title={`Kanban — ${project.name}`} subtitle="Ações do projeto organizadas por status" />
       <div className="flex gap-3 items-end mb-4 flex-wrap">
-        {[["PROJETO", "Todos os projetos"], ["EMPRESA", "Todas as empresas"], ["RESPONSÁVEL", "Todos os responsáveis"]].map(([l, o]) => (
-          <div key={l}><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>{l}</div>
-            <select className="border rounded-md px-3 py-1.5 text-sm bg-white" style={{ borderColor: C.border, color: C.navy }}><option>{o}</option></select></div>
-        ))}
-        <button className="border rounded-md px-3 py-1.5 text-sm" style={{ borderColor: C.border, color: C.navyMed }}>Limpar</button>
-        <div className="ml-auto text-sm" style={{ color: C.gray }}>147 ações</div>
+        <div>
+          <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>RESPONSÁVEL</div>
+          <select value={resp} onChange={(e) => setResp(e.target.value)} className="border rounded-md px-3 py-1.5 text-sm bg-white" style={{ borderColor: C.border, color: C.navy }}>
+            {["Todos", ...resps].map((o) => <option key={o}>{o}</option>)}
+          </select>
+        </div>
+        <button onClick={() => setResp("Todos")} className="border rounded-md px-3 py-1.5 text-sm" style={{ borderColor: C.border, color: C.navyMed }}>Limpar</button>
+        <div className="ml-auto text-sm" style={{ color: C.gray }}>{list.length} ações</div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {cols.map((col) => {
@@ -706,27 +753,20 @@ function Kanban() {
               <div className="flex items-center gap-2 mb-3 px-1">
                 <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.c }} />
                 <span className="font-bold text-sm" style={{ color: C.navy }}>{col}</span>
-                <span className="ml-auto text-xs px-2 py-0.5 rounded-full" style={{ background: "#eef1f6", color: C.navyMed }}>{KANBAN_COUNTS[col]}</span>
+                <span className="ml-auto text-xs px-2 py-0.5 rounded-full" style={{ background: "#eef1f6", color: C.navyMed }}>{grouped[col].length}</span>
               </div>
               <div className="space-y-2.5">
-                {KANBAN[col].map((c, i) => {
-                  const p = PROJ(c[1]);
-                  const isPwr = c[2] === "PWR Gestão";
-                  return (
-                    <div key={i} className="border rounded-md p-3 border-l-2" style={{ borderColor: C.border, borderLeftColor: s.c }}>
-                      <div className="font-semibold text-[13px] mb-2" style={{ color: C.navy }}>{c[0]}</div>
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] mb-1.5">
-                        <span className="flex items-center gap-1 font-semibold" style={{ color: C.navy }}><span className="w-2 h-2 rounded-full" style={{ background: p.color }} />{p.name}</span>
-                        <span className="font-semibold" style={{ color: isPwr ? C.orange : C.blue }}>{c[2]}</span>
-                        <span style={{ color: C.gray }}>{c[3]}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-[11px]">
-                        <OriginPill o={c[4]} />
-                        {c[5] && <span style={{ color: C.gray }}>{c[5]}</span>}
-                      </div>
+                {grouped[col].length === 0 && <div className="text-xs px-1 py-2" style={{ color: C.gray }}>—</div>}
+                {grouped[col].map((a, i) => (
+                  <div key={a.id || i} className="border rounded-md p-3 border-l-2" style={{ borderColor: C.border, borderLeftColor: s.c }}>
+                    <div className="font-semibold text-[13px] mb-2" style={{ color: C.navy }}>{a.acao || "—"}</div>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] mb-1.5">
+                      {a.id && <span className="font-semibold" style={{ color: C.blue }}>{a.id}</span>}
+                      {a.resp && <span style={{ color: C.gray }}>{a.resp}</span>}
                     </div>
-                  );
-                })}
+                    <div className="flex items-center gap-2 text-[11px]">{a.origem && <OriginPill o={a.origem} />}{a.fp && a.fp !== "–" && <span style={{ color: C.gray }}>{a.fp}</span>}</div>
+                  </div>
+                ))}
               </div>
             </div>
           );
@@ -736,22 +776,22 @@ function Kanban() {
   );
 }
 
-function FollowUp({ project }) {
-  const recent = [["Revisar indicadores de produção", "GOS-2"], ["Implantar rotina de reunião tática", "GOS-3"], ["Treinar equipe no novo processo", "GOS-5"], ["Definir metas do trimestre", "GOS-6"], ["Auditar controle de qualidade", "GOS-7"], ["Estruturar gestão à vista", "GOS-10"], ["Criar plano de ação 5S", "GOS-12"], ["Validar dados do ERP", "GOS-14"]];
+function FollowUp({ project, actions = [], onSave }) {
+  const recent = actions.filter((a) => a.st === "Finalizada").map((a) => [a.acao, a.id]);
   const [notes, setNotes] = useState({ av: "", imp: "", prox: "" });
   const [draft, setDraft] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const gerar = () => setDraft(
-    "Avanço: nesta semana concluímos a padronização de procedimentos operacionais e validamos os indicadores de produção junto à equipe. A rotina de reunião tática foi implantada e já está em uso pela liderança." +
-    (notes.av ? " " + notes.av : "") +
-    "\n\nImpedimentos e pontos de atenção: o treinamento da equipe do turno da noite segue pendente e a disponibilidade de dados do ERP ainda está limitada, o que impacta o mapeamento do fluxo de caixa." +
-    (notes.imp ? " " + notes.imp : "") +
-    "\n\nPróximos passos: iniciar o treinamento da equipe no novo processo, revisar o contrato com o fornecedor de embalagens e consolidar o relatório gerencial para envio até o fim da semana." +
-    (notes.prox ? " " + notes.prox : ""));
-  const fields = [
-    ["AVANÇO", "O que avançou nesta semana...", "av"],
-    ["IMPEDIMENTOS E PONTOS DE ATENÇÃO", "Bloqueios, riscos, dependências...", "imp"],
-    ["PRÓXIMOS PASSOS", "O que será feito a seguir...", "prox"],
-  ];
+    "Avanço:" + (notes.av ? " " + notes.av : " (descreva o que avançou nesta semana).") +
+    "\n\nImpedimentos e pontos de atenção:" + (notes.imp ? " " + notes.imp : " (bloqueios, riscos e dependências).") +
+    "\n\nPróximos passos:" + (notes.prox ? " " + notes.prox : " (o que será feito a seguir)."));
+  const salvar = async () => {
+    setSaving(true);
+    await onSave({ avanco: notes.av, impedimentos: notes.imp, proximos_passos: notes.prox, texto_final: draft });
+    setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 3000);
+  };
+  const fields = [["AVANÇO", "O que avançou nesta semana...", "av"], ["IMPEDIMENTOS E PONTOS DE ATENÇÃO", "Bloqueios, riscos, dependências...", "imp"], ["PRÓXIMOS PASSOS", "O que será feito a seguir...", "prox"]];
   return (
     <div>
       <PageHeader title={`Follow-Up Semanal — ${project.name}`} subtitle="Registre o avanço da semana e gere um rascunho executivo com IA" />
@@ -760,10 +800,9 @@ function FollowUp({ project }) {
           <div className="font-bold text-sm" style={{ color: C.navy }}>Ações concluídas recentes</div>
           <div className="text-[11px] mb-3" style={{ color: C.gray }}>Selecione as relacionadas a esta semana</div>
           <div className="flex flex-wrap gap-x-4 gap-y-2 mb-5">
+            {recent.length === 0 && <span className="text-[13px]" style={{ color: C.gray }}>Nenhuma ação concluída ainda.</span>}
             {recent.map(([t, id]) => (
-              <label key={id} className="flex items-center gap-1.5 text-[13px]" style={{ color: C.navyMed }}>
-                <input type="checkbox" /> {t}<span className="text-[10px]" style={{ color: C.gray }}>{id}</span>
-              </label>
+              <label key={id} className="flex items-center gap-1.5 text-[13px]" style={{ color: C.navyMed }}><input type="checkbox" /> {t}<span className="text-[10px]" style={{ color: C.gray }}>{id}</span></label>
             ))}
           </div>
           <div className="font-bold text-sm mb-1" style={{ color: C.navy }}>Nota do consultor</div>
@@ -771,8 +810,7 @@ function FollowUp({ project }) {
           {fields.map(([label, ph, k]) => (
             <div key={k} className="mb-4">
               <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>{label}</div>
-              <textarea value={notes[k]} onChange={(e) => setNotes((n) => ({ ...n, [k]: e.target.value }))} placeholder={ph} rows={2}
-                className="w-full border rounded-md px-3 py-2 text-sm resize-none" style={{ borderColor: C.border }} />
+              <textarea value={notes[k]} onChange={(e) => setNotes((n) => ({ ...n, [k]: e.target.value }))} placeholder={ph} rows={2} className="w-full border rounded-md px-3 py-2 text-sm resize-none" style={{ borderColor: C.border }} />
             </div>
           ))}
         </div>
@@ -782,20 +820,11 @@ function FollowUp({ project }) {
             <button onClick={gerar} className="rounded-md px-3 py-1.5 text-sm font-bold text-white flex items-center gap-1.5" style={{ background: C.orange }}><Sparkles size={14} /> Gerar rascunho com IA</button>
           </div>
           <div className="text-[11px] rounded-md px-3 py-2 mb-3" style={{ background: "#fff7f0", color: C.orange }}>Tom: direto, executivo, 1ª pessoa do plural, sem emojis · estrutura: Avanço / Impedimentos e pontos de atenção / Próximos passos</div>
-          <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={10} placeholder="O texto gerado aparece aqui e pode ser editado antes de salvar ou gerar o relatório."
-            className="w-full border rounded-md px-3 py-2 text-sm resize-none" style={{ borderColor: C.border }} />
-          <div className="flex gap-2 mt-3">
-            <button className="rounded-md px-4 py-2 text-sm font-bold text-white" style={{ background: C.navy }}>Salvar no banco</button>
+          <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={10} placeholder="O texto gerado aparece aqui e pode ser editado antes de salvar." className="w-full border rounded-md px-3 py-2 text-sm resize-none" style={{ borderColor: C.border }} />
+          <div className="flex gap-2 mt-3 items-center">
+            <button onClick={salvar} disabled={saving} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.navy }}>{saving ? "Salvando…" : "Salvar no banco"}</button>
             <button className="border rounded-md px-4 py-2 text-sm font-semibold" style={{ borderColor: C.border, color: C.navy }}>Gerar relatório PDF (ISO 9001:2015)</button>
-          </div>
-          <div className="mt-5">
-            <div className="text-[11px] font-semibold mb-2" style={{ color: C.gray }}>HISTÓRICO SALVO (1)</div>
-            <div className="font-bold text-sm" style={{ color: C.navy }}>07/07 – 11/07</div>
-            <p className="text-xs mt-1" style={{ color: C.gray }}>O que avançamos: concluímos a padronização de dois procedimentos operacionais e validamos os indicadores de produção. Pontos de atenção: a rotina de reunião tática ainda depende do engajamento da liderança. Próximos passos: iniciar o treinamento da equipe no novo processo.</p>
-            <div className="flex gap-2 mt-2">
-              <button className="border rounded-md px-3 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Visualizar</button>
-              <button className="border rounded-md px-3 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Imprimir (ISO 9001:2015)</button>
-            </div>
+            {saved && <span className="text-sm font-semibold" style={{ color: C.green }}>✓ Salvo</span>}
           </div>
         </div>
       </div>
@@ -805,7 +834,7 @@ function FollowUp({ project }) {
 
 function EmissaoAta({ project, onFill, filled }) {
   const [transcricao, setTranscricao] = useState("");
-  const usarExemplo = () => setTranscricao('Ana Prado: Bom dia a todos, vamos iniciar a reunião de acompanhamento.\nCarlos Nunes: A padronização do procedimento de recebimento foi concluída na semana passada.\nMarina Lopes: Ainda temos pendência no treinamento da equipe do turno da noite.\nRafael Dias: Como ponto de atenção, a disponibilidade de dados do ERP ainda está limitada.\nCarlos Nunes: Ótimo. Ficou decidido que vamos adotar o novo checklist em todas as unidades.\nAna Prado: Foi aprovado o novo cronograma de manutenção preventiva.');
+  const usarExemplo = () => setTranscricao('Ana Prado: Bom dia a todos, vamos iniciar a reunião de acompanhamento.\nCarlos Nunes: A padronização do procedimento de recebimento foi concluída na semana passada.\nMarina Lopes: Ainda temos pendência no treinamento da equipe do turno da noite.\nRafael Dias: Como ponto de atenção, a disponibilidade de dados do ERP ainda está limitada.');
   const SectionHead = ({ children, orange }) => (
     <div className="flex items-center gap-2 px-3 py-2 rounded-t-md text-white text-xs font-bold" style={{ background: orange ? C.orange : C.navyMed }}>
       {children}<button className="ml-2 text-[11px] px-2 py-0.5 rounded" style={{ background: "#ffffff2e" }}>+ Linha</button>
@@ -814,9 +843,8 @@ function EmissaoAta({ project, onFill, filled }) {
   const inp = "border rounded px-2 py-1 text-sm";
   return (
     <div>
-      <PageHeader title={`Emissão de ATA — ${project.name}`} subtitle="Suba ou cole a transcrição · a IA preenche a ATA no modelo padrão · encaminhamentos entram automaticamente na Base de Ações" />
+      <PageHeader title={`Emissão de ATA — ${project.name}`} subtitle="A IA preenche a ATA no modelo padrão · encaminhamentos entram na Base de Ações" />
       <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
-        {/* Esquerda */}
         <div className="bg-white rounded-lg border p-4" style={{ borderColor: C.border }}>
           <div className="flex items-center justify-between mb-2">
             <div className="font-bold text-sm" style={{ color: C.navy }}>Transcrição</div>
@@ -826,20 +854,14 @@ function EmissaoAta({ project, onFill, filled }) {
             <div className="font-bold text-sm" style={{ color: C.navy }}>Subir transcrição</div>
             <div className="text-[11px]" style={{ color: C.gray }}>.txt · .csv · .vtt · .srt</div>
           </div>
-          <div className="text-[10px] font-semibold" style={{ color: C.gray }}>DATA</div>
-          <input placeholder="dd/mm/aaaa" className={`${inp} w-full mb-2`} style={{ borderColor: C.border }} />
-          <div className="text-[10px] font-semibold" style={{ color: C.gray }}>LOCAL</div>
-          <input placeholder="Sede / Online" className={`${inp} w-full mb-2`} style={{ borderColor: C.border }} />
-          <textarea value={transcricao} onChange={(e) => setTranscricao(e.target.value)} rows={8} placeholder='Cole aqui a transcrição (ex: "Ana Prado: ...")...'
-            className="w-full border rounded-md px-3 py-2 text-sm resize-none mb-3" style={{ borderColor: C.border }} />
+          <textarea value={transcricao} onChange={(e) => setTranscricao(e.target.value)} rows={8} placeholder='Cole aqui a transcrição...' className="w-full border rounded-md px-3 py-2 text-sm resize-none mb-3" style={{ borderColor: C.border }} />
           <button onClick={onFill} className="w-full rounded-md py-2.5 text-sm font-bold text-white flex items-center justify-center gap-1.5" style={{ background: C.orange }}><Plus size={14} /> Preencher ATA automaticamente</button>
         </div>
-        {/* Direita */}
         <div className="bg-white rounded-lg border p-4" style={{ borderColor: C.border }}>
           <div className="font-bold text-sm mb-3" style={{ color: C.navy }}>ATA — modelo padrão</div>
           {!filled ? (
             <div className="border border-dashed rounded-md py-16 text-center text-sm" style={{ borderColor: C.border, color: C.gray }}>
-              Suba ou cole a transcrição e clique em "Preencher ATA automaticamente" para gerar a ata no modelo padrão.
+              Cole a transcrição e clique em "Preencher ATA automaticamente" para gerar a ata.
             </div>
           ) : (
             <div>
@@ -907,8 +929,18 @@ function EmissaoAta({ project, onFill, filled }) {
   );
 }
 
-function Responsaveis({ project }) {
+function Responsaveis({ project, responsaveis, actions, onCreate }) {
   const [modal, setModal] = useState(false);
+  const [form, setForm] = useState({ nome: "", empresa: project.client || "", papel: "", email: "" });
+  const [saving, setSaving] = useState(false);
+  const countByNome = useMemo(() => {
+    const m = {}; actions.forEach((a) => { if (a.resp) m[a.resp] = (m[a.resp] || 0) + 1; }); return m;
+  }, [actions]);
+  const salvar = async () => {
+    if (!form.nome.trim()) return;
+    setSaving(true); await onCreate(form); setSaving(false); setModal(false);
+    setForm({ nome: "", empresa: "Gosto Mineiro Laticínios", papel: "", email: "" });
+  };
   return (
     <div>
       <PageHeader title={`Responsáveis — ${project.name}`} subtitle="Lista de referência que alimenta o campo Responsável das ações"
@@ -917,13 +949,13 @@ function Responsaveis({ project }) {
         <table className="w-full text-sm">
           <thead><tr className="text-[11px] font-semibold text-left" style={{ color: C.gray }}>{["NOME", "EMPRESA", "PAPEL / FUNÇÃO", "E-MAIL", "AÇÕES", ""].map((h) => <th key={h} className="px-4 py-3">{h}</th>)}</tr></thead>
           <tbody>
-            {RESPONSAVEIS.map((r) => (
-              <tr key={r.email} className="border-t" style={{ borderColor: C.border }}>
+            {responsaveis.map((r) => (
+              <tr key={r.email || r.nome} className="border-t" style={{ borderColor: C.border }}>
                 <td className="px-4 py-3 font-bold" style={{ color: C.navy }}>{r.nome}</td>
                 <td className="px-4 py-3"><span className="text-xs font-semibold" style={{ color: r.pwr ? C.orange : C.blue }}>{r.empresa}</span></td>
                 <td className="px-4 py-3" style={{ color: C.navyMed }}>{r.papel}</td>
                 <td className="px-4 py-3" style={{ color: C.gray }}>{r.email}</td>
-                <td className="px-4 py-3" style={{ color: C.navyMed }}>{r.acoes} ações</td>
+                <td className="px-4 py-3" style={{ color: C.navyMed }}>{countByNome[r.nome] || 0} ações</td>
                 <td className="px-4 py-3"><div className="flex gap-2">
                   <button className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Editar</button>
                   <button className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.red }}>Excluir</button>
@@ -935,12 +967,12 @@ function Responsaveis({ project }) {
       </div>
       {modal && (
         <Modal title="Novo responsável" onClose={() => setModal(false)}>
-          <LabeledInput label="NOME" ph="Nome completo" />
-          <LabeledInput label="EMPRESA" defaultValue="Gosto Mineiro Laticínios" />
-          <LabeledInput label="PAPEL / FUNÇÃO" ph="Ex: Consultor, Gerente..." />
-          <LabeledInput label="E-MAIL" ph="pessoa@empresa.com" />
+          <LabeledInput label="NOME" ph="Nome completo" value={form.nome} onChange={(v) => setForm({ ...form, nome: v })} />
+          <LabeledInput label="EMPRESA" value={form.empresa} onChange={(v) => setForm({ ...form, empresa: v })} />
+          <LabeledInput label="PAPEL / FUNÇÃO" ph="Ex: Consultor, Gerente..." value={form.papel} onChange={(v) => setForm({ ...form, papel: v })} />
+          <LabeledInput label="E-MAIL" ph="pessoa@empresa.com" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
           <div className="flex gap-2 mt-4">
-            <button onClick={() => setModal(false)} className="rounded-md px-4 py-2 text-sm font-bold text-white" style={{ background: C.orange }}>Salvar</button>
+            <button onClick={salvar} disabled={saving} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{saving ? "Salvando…" : "Salvar"}</button>
             <button onClick={() => setModal(false)} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
           </div>
         </Modal>
@@ -949,33 +981,40 @@ function Responsaveis({ project }) {
   );
 }
 
-function Documentos({ project }) {
+function Documentos({ project, documentos, onCreate }) {
   const [modal, setModal] = useState(false);
+  const [form, setForm] = useState({ nome: "", tipo: "Relatório", link: "" });
+  const [saving, setSaving] = useState(false);
   const pillColor = { Kickoff: C.blue, Proposta: C.navyMed, Relatório: C.orange };
+  const salvar = async () => {
+    if (!form.nome.trim()) return;
+    setSaving(true); await onCreate(form); setSaving(false); setModal(false);
+    setForm({ nome: "", tipo: "Relatório", link: "" });
+  };
   return (
     <div>
       <PageHeader title={`Documentos — ${project.name}`} subtitle="Kickoff, proposta, relatórios · com link para o Drive"
         right={<button onClick={() => setModal(true)} className="rounded-md px-3 py-1.5 text-sm font-bold text-white flex items-center gap-1.5" style={{ background: C.orange }}><Plus size={14} /> Registrar documento</button>} />
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        {DOCS.map((d) => (
-          <div key={d.nome} className="bg-white rounded-lg border p-4" style={{ borderColor: C.border }}>
+        {documentos.map((d, i) => (
+          <div key={i} className="bg-white rounded-lg border p-4" style={{ borderColor: C.border }}>
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-[11px] font-bold px-2 py-0.5 rounded" style={{ background: "#eef1f6", color: pillColor[d.tipo] }}>{d.tipo}</span>
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded" style={{ background: "#eef1f6", color: pillColor[d.tipo] || C.navyMed }}>{d.tipo}</span>
               <span className="text-[11px]" style={{ color: C.gray }}>{d.data}</span>
             </div>
             <div className="font-bold text-sm mb-2" style={{ color: C.navy }}>{d.nome}</div>
-            <a className="text-sm font-semibold flex items-center gap-1" style={{ color: C.blue }}>Abrir no Drive <ExternalLink size={12} /></a>
+            <a href={d.link} target="_blank" rel="noreferrer" className="text-sm font-semibold flex items-center gap-1" style={{ color: C.blue }}>Abrir no Drive <ExternalLink size={12} /></a>
           </div>
         ))}
       </div>
       {modal && (
         <Modal title={`Registrar documento — ${project.name}`} onClose={() => setModal(false)}>
-          <LabeledInput label="NOME DO DOCUMENTO" ph="Ex: Relatório mensal" />
+          <LabeledInput label="NOME DO DOCUMENTO" ph="Ex: Relatório mensal" value={form.nome} onChange={(v) => setForm({ ...form, nome: v })} />
           <div className="mb-3"><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>TIPO</div>
-            <select className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}><option>Relatório</option><option>Kickoff</option><option>Proposta</option></select></div>
-          <LabeledInput label="LINK DO DRIVE" ph="https://drive.google.com/..." />
+            <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}><option>Relatório</option><option>Kickoff</option><option>Proposta</option></select></div>
+          <LabeledInput label="LINK DO DRIVE" ph="https://drive.google.com/..." value={form.link} onChange={(v) => setForm({ ...form, link: v })} />
           <div className="flex gap-2 mt-4">
-            <button onClick={() => setModal(false)} className="rounded-md px-4 py-2 text-sm font-bold text-white" style={{ background: C.orange }}>Registrar</button>
+            <button onClick={salvar} disabled={saving} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{saving ? "Salvando…" : "Registrar"}</button>
             <button onClick={() => setModal(false)} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
           </div>
         </Modal>
@@ -984,8 +1023,14 @@ function Documentos({ project }) {
   );
 }
 
-function Solicitacoes() {
+function Solicitacoes({ solicitacoes, onCreate }) {
+  const [form, setForm] = useState({ tipo: "Dúvida", descricao: "" });
+  const [saving, setSaving] = useState(false);
   const tipoColor = { "Correção de dados": C.blue, "Dúvida": C.navyMed, "Novo projeto": C.orange };
+  const salvar = async () => {
+    if (!form.descricao.trim()) return;
+    setSaving(true); await onCreate(form); setSaving(false); setForm({ tipo: "Dúvida", descricao: "" });
+  };
   return (
     <div>
       <PageHeader title="Solicitações" subtitle="Dúvidas, pedidos de novo projeto ou correção de dados — lista central da PWR" />
@@ -993,11 +1038,11 @@ function Solicitacoes() {
         <table className="w-full text-sm">
           <thead><tr className="text-[11px] font-semibold text-left" style={{ color: C.gray }}>{["DATA", "SOLICITANTE", "TIPO", "PROJETO", "DESCRIÇÃO", "STATUS"].map((h) => <th key={h} className="px-4 py-3">{h}</th>)}</tr></thead>
           <tbody>
-            {SOLICITACOES.map((s, i) => (
+            {solicitacoes.map((s, i) => (
               <tr key={i} className="border-t" style={{ borderColor: C.border }}>
                 <td className="px-4 py-3" style={{ color: C.gray }}>{s.data}</td>
                 <td className="px-4 py-3" style={{ color: C.blue }}>{s.quem}</td>
-                <td className="px-4 py-3"><span className="border rounded-full px-2.5 py-0.5 text-[11px] font-medium" style={{ borderColor: C.border, color: tipoColor[s.tipo] }}>{s.tipo}</span></td>
+                <td className="px-4 py-3"><span className="border rounded-full px-2.5 py-0.5 text-[11px] font-medium" style={{ borderColor: C.border, color: tipoColor[s.tipo] || C.navyMed }}>{s.tipo}</span></td>
                 <td className="px-4 py-3" style={{ color: C.navyMed }}>{s.proj}</td>
                 <td className="px-4 py-3" style={{ color: C.navyMed }}>{s.desc}</td>
                 <td className="px-4 py-3"><span className="text-xs font-bold" style={{ color: s.st === "Aberta" ? C.red : C.amber }}>{s.st}</span></td>
@@ -1010,18 +1055,18 @@ function Solicitacoes() {
         <div className="font-bold text-sm" style={{ color: C.navy }}>Nova solicitação</div>
         <div className="text-[11px] mb-3" style={{ color: C.gray }}>Qualquer usuário pode registrar</div>
         <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>TIPO</div>
-        <select className="border rounded-md px-3 py-2 text-sm w-full bg-white mb-3" style={{ borderColor: C.border, color: C.navy }}><option>Dúvida</option><option>Correção de dados</option><option>Novo projeto</option></select>
+        <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full bg-white mb-3" style={{ borderColor: C.border, color: C.navy }}><option>Dúvida</option><option>Correção de dados</option><option>Novo projeto</option></select>
         <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>DESCRIÇÃO</div>
-        <textarea rows={3} placeholder="Descreva sua solicitação..." className="w-full border rounded-md px-3 py-2 text-sm resize-none mb-3" style={{ borderColor: C.border }} />
-        <button className="w-full rounded-md py-2.5 text-sm font-bold text-white" style={{ background: C.orange }}>Registrar solicitação</button>
+        <textarea value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} rows={3} placeholder="Descreva sua solicitação..." className="w-full border rounded-md px-3 py-2 text-sm resize-none mb-3" style={{ borderColor: C.border }} />
+        <button onClick={salvar} disabled={saving} className="w-full rounded-md py-2.5 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{saving ? "Registrando…" : "Registrar solicitação"}</button>
       </div>
     </div>
   );
 }
 
-function Administracao() {
+function Administracao({ projetos }) {
   const [modal, setModal] = useState(false);
-  const chips = ["admin@pwrgestao.com · Admin", "ana.prado@pwrgestao.com · Consultor PWR", "consultor@pwrgestao.com · Consultor PWR", "carlos@gostomineiro.com · Cliente", "marina@gostomineiro.com · Cliente"];
+  const chips = ["mathauscruz@pwrgestao.com · Master (Admin)"];
   return (
     <div>
       <PageHeader title="Administração" subtitle="Projetos, clientes e controle de acesso"
@@ -1030,7 +1075,7 @@ function Administracao() {
         <table className="w-full text-sm">
           <thead><tr className="text-[11px] font-semibold text-left" style={{ color: C.gray }}>{["PROJETO", "CLIENTE", "REGIÃO", "PORTFÓLIOS", "STATUS", "AÇÕES", "% CONCL.", "ACESSOS"].map((h) => <th key={h} className="px-4 py-3">{h}</th>)}</tr></thead>
           <tbody>
-            {PROJECTS.map((p) => (
+            {projetos.map((p) => (
               <tr key={p.id} className="border-t" style={{ borderColor: C.border }}>
                 <td className="px-4 py-3"><div className="flex items-center gap-2"><ProjIcon p={p} size={24} /><span className="font-bold" style={{ color: C.navy }}>{p.name}</span></div></td>
                 <td className="px-4 py-3" style={{ color: C.gray }}>{p.client}</td>
@@ -1049,13 +1094,13 @@ function Administracao() {
         <div className="font-bold text-sm" style={{ color: C.navy }}>Conceder acesso por projeto</div>
         <div className="text-[11px] mb-3" style={{ color: C.gray }}>Selecione o projeto, informe e-mail + senha inicial e o papel</div>
         <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_140px_130px_120px] gap-3 items-end">
-          <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>PROJETO</div><select className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}><option>Gosto Mineiro — Gosto Mineiro Laticínios</option></select></div>
+          <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>PROJETO</div><select className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}>{projetos.map((p) => <option key={p.id}>{p.name} — {p.client}</option>)}</select></div>
           <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>E-MAIL</div><input placeholder="pessoa@empresa.com" className="border rounded-md px-3 py-2 text-sm w-full" style={{ borderColor: C.border }} /></div>
           <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>SENHA INICIAL</div><input type="password" defaultValue="123456" className="border rounded-md px-3 py-2 text-sm w-full" style={{ borderColor: C.border }} /></div>
           <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>PAPEL</div><select className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}><option>Cliente</option><option>Consultor</option><option>Admin</option></select></div>
           <button className="rounded-md py-2 text-sm font-bold text-white" style={{ background: C.navy }}>Conceder</button>
         </div>
-        <div className="text-[10px] font-semibold mt-4 mb-2" style={{ color: C.gray }}>COM ACESSO A GOSTO MINEIRO</div>
+        <div className="text-[10px] font-semibold mt-4 mb-2" style={{ color: C.gray }}>USUÁRIOS COM ACESSO</div>
         <div className="flex flex-wrap gap-2">
           {chips.map((c) => <span key={c} className="flex items-center gap-1.5 border rounded-full px-3 py-1 text-xs" style={{ borderColor: C.border, color: C.navy }}>{c} <X size={12} color={C.red} /></span>)}
         </div>
@@ -1085,7 +1130,7 @@ function Administracao() {
 function Modal({ title, children, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "#05244f66" }}>
-      <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl">
+      <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <div className="font-extrabold text-lg" style={{ color: C.navy }}>{title}</div>
           <button onClick={onClose} className="w-7 h-7 rounded-md border flex items-center justify-center" style={{ borderColor: C.border }}><X size={14} color={C.gray} /></button>
@@ -1095,15 +1140,16 @@ function Modal({ title, children, onClose }) {
     </div>
   );
 }
-function LabeledInput({ label, ph, defaultValue }) {
+function LabeledInput({ label, ph, value, defaultValue, onChange }) {
   return (
     <div className="mb-3">
       <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>{label}</div>
-      <input placeholder={ph} defaultValue={defaultValue} className="border rounded-md px-3 py-2 text-sm w-full" style={{ borderColor: C.border }} />
+      <input placeholder={ph} value={value} defaultValue={defaultValue} onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+        className="border rounded-md px-3 py-2 text-sm w-full" style={{ borderColor: C.border }} />
     </div>
   );
 }
-function ProjectPicker({ onPick, onClose }) {
+function ProjectPicker({ projetos, onPick, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "#05244f66" }}>
       <div className="bg-white rounded-xl p-5 w-full max-w-md shadow-2xl max-h-[80vh] overflow-y-auto">
@@ -1112,7 +1158,7 @@ function ProjectPicker({ onPick, onClose }) {
           <button onClick={onClose} className="w-7 h-7 rounded-md border flex items-center justify-center" style={{ borderColor: C.border }}><X size={14} color={C.gray} /></button>
         </div>
         <div className="space-y-3">
-          {PROJECTS.filter((p) => p.status === "Ativo").map((p) => (
+          {projetos.filter((p) => p.status === "Ativo").map((p) => (
             <button key={p.id} onClick={() => onPick(p)} className="w-full border rounded-lg p-3 text-left hover:shadow-md transition-shadow" style={{ borderColor: C.border }}>
               <div className="flex items-center gap-2.5 mb-1"><ProjIcon p={p} size={26} /><span className="font-bold" style={{ color: C.navy }}>{p.name}</span></div>
               <div className="text-[11px] mb-1" style={{ color: C.gray }}>{p.region} · {p.uf}</div>
@@ -1127,89 +1173,258 @@ function ProjectPicker({ onPick, onClose }) {
 }
 
 /* ============================ LOGIN ============================ */
-function Login({ onLogin }) {
+function Login({ onLogin, onSignIn, loginError, busy }) {
+  const [email, setEmail] = useState("");
+  const [senha, setSenha] = useState("");
+  const submit = () => { if (email && senha) onSignIn(email, senha); };
   return (
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "radial-gradient(circle at 30% 20%, #0d2f63, #05122b)" }}>
       <div className="bg-white rounded-2xl p-8 w-full max-w-md shadow-2xl">
-        <div className="w-12 h-12 rounded-full border-2 flex items-center justify-center mb-4" style={{ borderColor: C.orange, background: C.navy }}>
-          <ChevronRight size={22} color={C.orange} />
-        </div>
+        <div className="w-12 h-12 rounded-full border-2 flex items-center justify-center mb-4" style={{ borderColor: C.orange, background: C.navy }}><ChevronRight size={22} color={C.orange} /></div>
         <div className="font-extrabold text-3xl tracking-tight" style={{ color: C.navy }}>pwr<span style={{ color: C.orange }}>.</span></div>
         <div className="text-[10px] tracking-[0.25em] mb-6" style={{ color: C.blue }}>PORTFOLIO · PAINEL CENTRAL</div>
-        <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>E-MAIL</div>
-        <input placeholder="voce@empresa.com" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
-        <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>SENHA</div>
-        <input type="password" defaultValue="demo1234" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
-        <button onClick={() => onLogin("admin")} className="w-full rounded-md py-2.5 text-sm font-bold text-white mb-5" style={{ background: C.orange }}>Entrar</button>
-        <div className="text-[11px] font-semibold mb-2" style={{ color: C.blue }}>Entrar como (demo):</div>
-        <div className="grid grid-cols-2 gap-2">
-          <button onClick={() => onLogin("admin")} className="border rounded-md py-2 text-sm font-bold" style={{ borderColor: C.border, color: C.navy }}>Admin PWR</button>
-          <button onClick={() => onLogin("consultor")} className="border rounded-md py-2 text-sm font-bold" style={{ borderColor: C.border, color: C.navy }}>Consultor</button>
-          <button onClick={() => onLogin("cliente")} className="border rounded-md py-2 text-sm font-bold col-span-2" style={{ borderColor: C.border, color: C.navy }}>Cliente</button>
-        </div>
+
+        {hasSupabase ? (
+          <>
+            <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>E-MAIL</div>
+            <input value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="voce@empresa.com" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
+            <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>SENHA</div>
+            <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="••••••••" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
+            {loginError && <div className="text-sm mb-3 rounded-md px-3 py-2" style={{ background: "#fee2e2", color: C.red }}>{loginError}</div>}
+            <button onClick={submit} disabled={busy} className="w-full rounded-md py-2.5 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{busy ? "Entrando…" : "Entrar"}</button>
+          </>
+        ) : (
+          <>
+            <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>E-MAIL</div>
+            <input placeholder="voce@empresa.com" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
+            <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>SENHA</div>
+            <input type="password" defaultValue="demo1234" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
+            <button onClick={() => onLogin("admin")} className="w-full rounded-md py-2.5 text-sm font-bold text-white mb-5" style={{ background: C.orange }}>Entrar</button>
+            <div className="text-[11px] font-semibold mb-2" style={{ color: C.blue }}>Entrar como (demo):</div>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => onLogin("admin")} className="border rounded-md py-2 text-sm font-bold" style={{ borderColor: C.border, color: C.navy }}>Admin PWR</button>
+              <button onClick={() => onLogin("consultor")} className="border rounded-md py-2 text-sm font-bold" style={{ borderColor: C.border, color: C.navy }}>Consultor</button>
+              <button onClick={() => onLogin("cliente")} className="border rounded-md py-2 text-sm font-bold col-span-2" style={{ borderColor: C.border, color: C.navy }}>Cliente</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
 }
+
+/* ============================ HELPERS APP ============================ */
+const numFrom = (id) => { const n = parseInt(String(id).split("-")[1], 10); return isNaN(n) ? 0 : n; };
+const toISO = (s) => { if (!s || s === "–") return null; const [d, m, y] = s.split("/"); if (!d || !m || !y) return null; const yyyy = y.length === 2 ? "20" + y : y; return `${yyyy}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`; };
 
 /* ============================ APP ============================ */
 export default function App() {
   const [logged, setLogged] = useState(false);
   const [role, setRole] = useState("admin");
   const [page, setPage] = useState("portfolio");
+  const [projetos, setProjetos] = useState(PROJECTS);
   const [project, setProject] = useState(PROJ("gosto"));
   const [picker, setPicker] = useState(false);
   const [ataFilled, setAtaFilled] = useState(false);
-  const [ataAdded, setAtaAdded] = useState(false);
+  const [dbStatus, setDbStatus] = useState(hasSupabase ? "checking" : "demo");
+  const [perfil, setPerfil] = useState(null);
+  const [authReady, setAuthReady] = useState(!hasSupabase);
+  const [loginError, setLoginError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const login = (r) => { setLogged(true); setRole(r); setPage(r === "admin" ? "portfolio" : "dashboard"); if (r !== "admin") setProject(PROJ(r === "cliente" ? "gosto" : "metalica")); };
+  const [acoesState, setAcoesState] = useState(GOSTO_ACOES);
+  const [respState, setRespState] = useState(RESPONSAVEIS);
+  const [docState, setDocState] = useState(DOCS);
+  const [solic, setSolic] = useState(SOLICITACOES);
 
-  const changeRole = (r) => {
-    setRole(r);
-    const pages = ROLE_PAGES[r];
-    if (!pages.includes(page)) setPage(r === "admin" ? "portfolio" : "dashboard");
-    if (r === "consultor" && project.id === "gosto") setProject(PROJ("metalica"));
+  // testa conexão ao banco na inicialização
+  useEffect(() => {
+    if (!hasSupabase) { setDbStatus("demo"); return; }
+    api.pingDB().then(() => setDbStatus("online")).catch((e) => { console.error("ping:", e.message); setDbStatus("error"); });
+  }, []);
+
+  // sessão Supabase Auth: papel vem do perfil, não de um seletor
+  const bootstrap = async () => {
+    try {
+      const p = await api.getPerfil();
+      const papel = p?.papel || "cliente";
+      setPerfil(p); setRole(papel);
+      setPage(papel === "admin" ? "portfolio" : "dashboard");
+      setLogged(true);
+    } catch (e) {
+      console.error("perfil:", e.message);
+      setPerfil(null); setRole("cliente"); setPage("dashboard"); setLogged(true);
+    } finally { setAuthReady(true); }
+  };
+  useEffect(() => {
+    if (!hasSupabase) return;
+    supabase.auth.getSession().then(({ data }) => { if (data.session) bootstrap(); else setAuthReady(true); });
+    const { data: sub } = supabase.auth.onAuthStateChange((ev, session) => {
+      if (ev === "INITIAL_SESSION") return;
+      if (session) bootstrap(); else { setLogged(false); setPerfil(null); }
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  const handleSignIn = async (email, senha) => {
+    setLoginError(""); setBusy(true);
+    try { await api.signIn(email, senha); }
+    catch (e) { console.error("signIn:", e.message); setLoginError("E-mail ou senha inválidos."); }
+    finally { setBusy(false); }
+  };
+  const handleLogout = async () => {
+    if (hasSupabase) { try { await api.signOut(); } catch (e) { console.error(e); } }
+    setLogged(false); setPerfil(null);
   };
 
-  const openProject = (p) => { setProject(p); setPage("dashboard"); };
+  // carrega projetos + solicitações ao logar
+  useEffect(() => {
+    if (!logged || !hasSupabase) return;
+    (async () => {
+      try { const ps = await api.listProjetos(); if (ps.length) { setProjetos(ps); setProject((cur) => ps.find((p) => p.id === cur.id) || ps[0]); } } catch (e) { console.error("projetos:", e.message); }
+      try { const ss = await api.listSolicitacoes(); setSolic(ss); } catch (e) { console.error("solicitacoes:", e.message); }
+    })();
+  }, [logged]);
 
-  // ações do projeto atual (Gosto Mineiro tem lista real; demais são sintéticas)
-  const actions = useMemo(() => {
-    if (project.id === "gosto") return ataAdded ? [...GOSTO_ACOES, ...GOSTO_ATA_EXTRA] : GOSTO_ACOES;
-    if (project.status === "Não iniciado") return [];
-    return genActions(project);
-  }, [project, ataAdded]);
+  const projById = (id) => projetos.find((p) => p.id === id) || PROJ(id);
 
-  const dashData = useMemo(() => buildDashboard(actions), [actions]);
+  // carrega dados do projeto atual
+  const loadProject = async (id) => {
+    const proj = projById(id);
+    let acts = null, resp = null, docs = null;
+    if (hasSupabase) {
+      try { acts = await api.listAcoes(id); } catch (e) { console.error("acoes:", e.message); }
+      try { resp = await api.listResponsaveis(id); } catch (e) { console.error("resp:", e.message); }
+      try { docs = await api.listDocumentos(id); } catch (e) { console.error("docs:", e.message); }
+    }
+    if (!acts || acts.length === 0) acts = id === "gosto" ? GOSTO_ACOES : (proj.status === "Não iniciado" ? [] : genActions(proj));
+    if (!resp || resp.length === 0) resp = RESPONSAVEIS;
+    if (!docs || docs.length === 0) docs = DOCS;
+    setAcoesState(acts); setRespState(resp); setDocState(docs);
+  };
 
-  if (!logged) return <Login onLogin={login} />;
+  useEffect(() => { if (logged) loadProject(project.id); /* eslint-disable-next-line */ }, [logged, project.id]);
+
+  const login = (r) => {
+    setLogged(true); setRole(r); setPage(r === "admin" ? "portfolio" : "dashboard");
+    if (r !== "admin") setProject(PROJ(r === "cliente" ? "gosto" : "metalica"));
+    setAtaFilled(false);
+  };
+  const changeRole = (r) => {
+    setRole(r);
+    if (!ROLE_PAGES[r].includes(page)) setPage(r === "admin" ? "portfolio" : "dashboard");
+    if (r === "consultor" && project.id === "gosto") setProject(PROJ("metalica"));
+  };
+  const openProject = (p) => { setProject(p); setPage("dashboard"); setAtaFilled(false); };
+
+  // ---- handlers de escrita ----
+  const nextCodigo = (offset = 0) => {
+    const prefix = project.id.slice(0, 3).toUpperCase();
+    const max = acoesState.reduce((m, a) => Math.max(m, numFrom(a.id)), 0);
+    return `${prefix}-${max + 1 + offset}`;
+  };
+  const handleCreateAcao = async (form) => {
+    const codigo = nextCodigo();
+    if (hasSupabase) {
+      try {
+        const responsavel_id = respState.find((r) => r.nome === form.resp)?.id || null;
+        await api.createAcao(project.id, {
+          codigo, descricao: form.descricao, fase: form.fase, origem: form.origem,
+          responsavel_id, data_abertura: toISO(form.ab), fecho_planejado: toISO(form.fp), status: form.st,
+        });
+        await loadProject(project.id);
+        return;
+      } catch (e) { console.error("createAcao:", e.message); }
+    }
+    setAcoesState((prev) => [...prev, { id: codigo, acao: form.descricao, fase: form.fase, origem: form.origem, resp: form.resp, ab: form.ab || "–", fp: form.fp || "–", fr: "–", st: form.st }]);
+  };
+  const handleCreateResponsavel = async (form) => {
+    const is_pwr = form.empresa === "PWR Gestão";
+    if (hasSupabase) {
+      try { const r = await api.createResponsavel(project.id, { nome: form.nome, empresa: form.empresa, papel: form.papel, email: form.email, is_pwr }); setRespState((prev) => [...prev, r]); return; }
+      catch (e) { console.error("createResponsavel:", e.message); }
+    }
+    setRespState((prev) => [...prev, { nome: form.nome, empresa: form.empresa, pwr: is_pwr, papel: form.papel, email: form.email }]);
+  };
+  const handleCreateDocumento = async (form) => {
+    if (hasSupabase) {
+      try { await api.createDocumento(project.id, { nome: form.nome, tipo: form.tipo, link_drive: form.link, data: new Date().toISOString().slice(0, 10) }); await loadProject(project.id); return; }
+      catch (e) { console.error("createDocumento:", e.message); }
+    }
+    const hoje = new Date(); const dd = String(hoje.getDate()).padStart(2, "0"), mm = String(hoje.getMonth() + 1).padStart(2, "0"), yy = String(hoje.getFullYear()).slice(2);
+    setDocState((prev) => [{ tipo: form.tipo, data: `${dd}/${mm}/${yy}`, nome: form.nome, link: form.link || "https://drive.google.com/" }, ...prev]);
+  };
+  const handleCreateSolicitacao = async (form) => {
+    if (hasSupabase) {
+      try { await api.createSolicitacao({ tipo: form.tipo, descricao: form.descricao, solicitante_email: "demo@pwrgestao.com" }); const ss = await api.listSolicitacoes(); setSolic(ss); return; }
+      catch (e) { console.error("createSolicitacao:", e.message); }
+    }
+    const hoje = new Date(); const dd = String(hoje.getDate()).padStart(2, "0"), mm = String(hoje.getMonth() + 1).padStart(2, "0"), yy = String(hoje.getFullYear()).slice(2);
+    setSolic((prev) => [{ data: `${dd}/${mm}/${yy}`, quem: "demo@pwrgestao.com", tipo: form.tipo, proj: "—", desc: form.descricao, st: "Aberta" }, ...prev]);
+  };
+  const handleSaveFollowup = async (form) => {
+    if (hasSupabase) { try { await api.saveFollowup(project.id, form); return; } catch (e) { console.error("saveFollowup:", e.message); } }
+    // modo mock: nada a persistir
+  };
+  const handleFillAta = async () => {
+    if (hasSupabase) {
+      try {
+        const enc = ATA_EXAMPLE.encaminhamentos.map((e, i) => ({
+          codigo: nextCodigo(i), descricao: e[0], fase: ["Implantação", "Estruturação", "Implantação"][i] || "Implantação",
+          origem: "Ata", status: "Aberta", fecho_planejado: toISO(e[2]) || null,
+          responsavel_id: respState.find((r) => r.nome === e[1])?.id || null,
+        }));
+        await api.saveAta(project.id, {
+          data: ATA_EXAMPLE.data, local: ATA_EXAMPLE.local,
+          participantes: ATA_EXAMPLE.participantes.map(([nome, empresa]) => ({ nome, presenca: "Presente", empresa })),
+          pauta: ATA_EXAMPLE.pauta.map((texto) => ({ texto, status: "Discutido" })),
+          decisoes: ATA_EXAMPLE.decisoes.map((texto) => ({ texto, responsavel: "" })),
+        }, enc);
+        await loadProject(project.id);
+      } catch (e) { console.error("saveAta:", e.message); }
+    } else if (project.id === "gosto" && !acoesState.some((a) => a.id === "GOS-18")) {
+      setAcoesState((prev) => [...prev, ...GOSTO_ATA_EXTRA]);
+    }
+    setAtaFilled(true);
+  };
+
+  const dashData = useMemo(() => buildDashboard(acoesState), [acoesState]);
+
+  if (hasSupabase && !authReady) return (
+    <div className="min-h-screen grid place-items-center" style={{ background: C.page }}>
+      <span className="text-sm" style={{ color: C.gray }}>Carregando…</span>
+    </div>
+  );
+  if (!logged) return <Login onLogin={login} onSignIn={handleSignIn} loginError={loginError} busy={busy} />;
+
+  const canSwitchRole = !hasSupabase || perfil?.papel === "admin";
 
   const render = () => {
     switch (page) {
-      case "portfolio": return <Portfolio openProject={openProject} />;
-      case "mapa": return <MapaBrasil openProject={openProject} />;
+      case "portfolio": return <Portfolio projetos={projetos} openProject={openProject} />;
+      case "mapa": return <MapaBrasil projetos={projetos} openProject={openProject} />;
       case "dashboard": return <Dashboard data={dashData} />;
       case "gantt": return <Gantt project={project} />;
-      case "acoes": return <BaseAcoes project={project} actions={actions} />;
+      case "acoes": return <BaseAcoes project={project} actions={acoesState} responsaveis={respState} onCreate={handleCreateAcao} />;
       case "kanban": return <Kanban />;
-      case "followup": return <FollowUp project={project} />;
-      case "ata": return <EmissaoAta project={project} filled={ataFilled} onFill={() => { setAtaFilled(true); setAtaAdded(true); }} />;
-      case "responsaveis": return <Responsaveis project={project} />;
-      case "documentos": return <Documentos project={project} />;
-      case "solicitacoes": return <Solicitacoes />;
-      case "administracao": return <Administracao />;
+      case "followup": return <FollowUp project={project} onSave={handleSaveFollowup} />;
+      case "ata": return <EmissaoAta project={project} filled={ataFilled} onFill={handleFillAta} />;
+      case "responsaveis": return <Responsaveis project={project} responsaveis={respState} actions={acoesState} onCreate={handleCreateResponsavel} />;
+      case "documentos": return <Documentos project={project} documentos={docState} onCreate={handleCreateDocumento} />;
+      case "solicitacoes": return <Solicitacoes solicitacoes={solic} onCreate={handleCreateSolicitacao} />;
+      case "administracao": return <Administracao projetos={projetos} />;
       default: return null;
     }
   };
 
   return (
     <div className="flex h-screen text-[15px]" style={{ background: C.page, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
-      <Sidebar role={role} page={page} setPage={setPage} project={project} ataAdded={ataAdded} />
+      <Sidebar role={role} page={page} setPage={setPage} acoesCount={acoesState.length} />
       <div className="flex-1 flex flex-col min-w-0">
-        <TopBar role={role} setRole={changeRole} page={page} project={project} openProjectPicker={() => setPicker(true)} onLogout={() => setLogged(false)} />
+        <TopBar role={role} setRole={changeRole} page={page} project={project} openProjectPicker={() => setPicker(true)} onLogout={handleLogout} dbStatus={dbStatus} canSwitchRole={canSwitchRole} />
         <main className="flex-1 overflow-y-auto p-6">{render()}</main>
       </div>
-      {picker && <ProjectPicker onPick={(p) => { setProject(p); setPicker(false); }} onClose={() => setPicker(false)} />}
+      {picker && <ProjectPicker projetos={projetos} onPick={(p) => { setProject(p); setPicker(false); }} onClose={() => setPicker(false)} />}
     </div>
   );
 }

@@ -118,3 +118,27 @@ export async function saveAta(projetoId, ata, encaminhamentos) {
   }
   return data
 }
+
+// ---- PING (teste de conexão) ----
+export async function pingDB() {
+  const { error } = await supabase.from('projetos').select('id', { head: true, count: 'exact' })
+  if (error) throw error
+  return true
+}
+
+// ---- AUTENTICAÇÃO (Supabase Auth) ----
+export async function signIn(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+  if (error) throw error
+  return data
+}
+export async function signOut() {
+  await supabase.auth.signOut()
+}
+export async function getPerfil() {
+  const { data: u } = await supabase.auth.getUser()
+  if (!u?.user) return null
+  const { data, error } = await supabase.from('perfis').select('papel, nome, email').eq('id', u.user.id).single()
+  if (error) throw error
+  return data
+}
