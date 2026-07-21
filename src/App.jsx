@@ -258,32 +258,34 @@ function AlertPanel({ color, title, items, empty }) {
 }
 
 /* ============================ SIDEBAR ============================ */
-function Sidebar({ role, page, setPage, acoesCount }) {
+function Sidebar({ role, page, setPage, acoesCount, collapsed }) {
   const pages = ROLE_PAGES[role];
   const items = NAV.filter((n) => pages.includes(n.id));
   return (
-    <aside className="w-[224px] shrink-0 flex flex-col text-white" style={{ background: C.sidebar }}>
-      <div className="px-5 py-4 flex items-center gap-2.5 border-b" style={{ borderColor: "#ffffff14" }}>
-        <div className="w-8 h-8 rounded-full border-2 flex items-center justify-center" style={{ borderColor: C.orange }}>
+    <aside className="shrink-0 flex flex-col text-white transition-all duration-200" style={{ background: C.sidebar, width: collapsed ? 64 : 224 }}>
+      <div className={`py-4 flex items-center gap-2.5 border-b ${collapsed ? "px-0 justify-center" : "px-5"}`} style={{ borderColor: "#ffffff14" }}>
+        <div className="w-8 h-8 rounded-full border-2 flex items-center justify-center shrink-0" style={{ borderColor: C.orange }}>
           <ChevronRight size={16} color={C.orange} />
         </div>
-        <div className="leading-none">
-          <div className="font-extrabold text-lg tracking-tight">pwr<span style={{ color: C.orange }}>.</span></div>
-          <div className="text-[8px] tracking-[0.2em] mt-0.5" style={{ color: "#7f93b5" }}>GESTÃO · PORTFOLIO</div>
-        </div>
+        {!collapsed && (
+          <div className="leading-none">
+            <div className="font-extrabold text-lg tracking-tight">pwr<span style={{ color: C.orange }}>.</span></div>
+            <div className="text-[8px] tracking-[0.2em] mt-0.5" style={{ color: "#7f93b5" }}>GESTÃO · PORTFOLIO</div>
+          </div>
+        )}
       </div>
-      <nav className="flex-1 py-3 overflow-y-auto">
+      <nav className="flex-1 py-3 overflow-y-auto overflow-x-hidden">
         {items.map((n) => {
           const active = page === n.id;
           const Ico = n.icon;
           return (
-            <button key={n.id} onClick={() => setPage(n.id)}
-              className="w-full flex items-center gap-3 px-5 py-2.5 text-sm transition-colors"
+            <button key={n.id} onClick={() => setPage(n.id)} title={collapsed ? n.label : undefined}
+              className={`w-full flex items-center gap-3 py-2.5 text-sm transition-colors ${collapsed ? "px-0 justify-center" : "px-5"}`}
               style={{ background: active ? C.orange : "transparent", color: active ? "#fff" : "#c7d2e6", fontWeight: active ? 700 : 500 }}>
-              <Ico size={18} />
-              <span className="flex-1 text-left">{n.label}</span>
-              {n.badge === "acoes" && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: active ? "#ffffff33" : "#ffffff1a", color: "#fff" }}>{acoesCount}</span>}
-              {n.badge3 && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: active ? "#ffffff33" : "#ffffff1a", color: "#fff" }}>3</span>}
+              <Ico size={18} className="shrink-0" />
+              {!collapsed && <span className="flex-1 text-left">{n.label}</span>}
+              {!collapsed && n.badge === "acoes" && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: active ? "#ffffff33" : "#ffffff1a", color: "#fff" }}>{acoesCount}</span>}
+              {!collapsed && n.badge3 && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: active ? "#ffffff33" : "#ffffff1a", color: "#fff" }}>3</span>}
             </button>
           );
         })}
@@ -308,13 +310,15 @@ function DbBadge({ status }) {
   );
 }
 
-function TopBar({ role, setRole, page, project, openProjectPicker, onLogout, dbStatus, canSwitchRole }) {
+function TopBar({ role, setRole, page, project, openProjectPicker, onLogout, dbStatus, canSwitchRole, onToggleSidebar }) {
   const isProjectLevel = NAV.find((n) => n.id === page)?.level === "project";
   const title = NAV.find((n) => n.id === page)?.label || "";
   const crumbProj = isProjectLevel && project ? project.name : "PWR Gestão";
   return (
     <header className="h-16 bg-white border-b flex items-center px-5 gap-4 shrink-0" style={{ borderColor: C.border }}>
-      <Menu size={20} color={C.navyMed} className="shrink-0" />
+      <button onClick={onToggleSidebar} className="shrink-0 w-8 h-8 rounded-md flex items-center justify-center hover:bg-slate-100 transition-colors" title="Recolher/expandir menu">
+        <Menu size={20} color={C.navyMed} />
+      </button>
       <div className="leading-tight">
         <div className="text-[11px]" style={{ color: C.gray }}>{crumbProj} · {ROLE_LABEL[role]}</div>
         <div className="text-lg font-extrabold" style={{ color: C.navy }}>{title}</div>
@@ -1064,9 +1068,33 @@ function Solicitacoes({ solicitacoes, onCreate }) {
   );
 }
 
-function Administracao({ projetos }) {
+function Administracao({ projetos, onCreateUser }) {
   const [modal, setModal] = useState(false);
-  const chips = ["mathauscruz@pwrgestao.com · Master (Admin)"];
+  const [usuarios, setUsuarios] = useState([]);
+  const [novo, setNovo] = useState({ nome: "", email: "", senha: "", papel: "cliente", projetoId: projetos[0]?.id || "" });
+  const [msg, setMsg] = useState(null); // {tipo:'ok'|'erro', texto}
+  const [saving, setSaving] = useState(false);
+  const papelLabel = { admin: "Admin", consultor: "Consultor", cliente: "Cliente" };
+
+  const carregarUsuarios = () => {
+    if (!hasSupabase) return;
+    api.listUsuarios().then(setUsuarios).catch((e) => console.error("usuarios:", e.message));
+  };
+  useEffect(() => { carregarUsuarios(); }, []);
+
+  const criar = async () => {
+    if (!hasSupabase) { setMsg({ tipo: "erro", texto: "Disponível apenas com o banco conectado." }); return; }
+    if (!novo.email || !novo.senha) { setMsg({ tipo: "erro", texto: "Preencha e-mail e senha." }); return; }
+    setSaving(true); setMsg(null);
+    try {
+      await onCreateUser({ email: novo.email.trim(), password: novo.senha, papel: novo.papel, nome: novo.nome, projetoId: novo.projetoId });
+      setMsg({ tipo: "ok", texto: `Conta criada para ${novo.email} (${papelLabel[novo.papel]}).` });
+      setNovo({ nome: "", email: "", senha: "", papel: "cliente", projetoId: projetos[0]?.id || "" });
+      carregarUsuarios();
+    } catch (e) {
+      setMsg({ tipo: "erro", texto: e.message || "Falha ao criar a conta." });
+    } finally { setSaving(false); }
+  };
   return (
     <div>
       <PageHeader title="Administração" subtitle="Projetos, clientes e controle de acesso"
@@ -1091,18 +1119,31 @@ function Administracao({ projetos }) {
         </table>
       </div>
       <div className="bg-white rounded-lg border p-5" style={{ borderColor: C.border }}>
-        <div className="font-bold text-sm" style={{ color: C.navy }}>Conceder acesso por projeto</div>
-        <div className="text-[11px] mb-3" style={{ color: C.gray }}>Selecione o projeto, informe e-mail + senha inicial e o papel</div>
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_140px_130px_120px] gap-3 items-end">
-          <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>PROJETO</div><select className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}>{projetos.map((p) => <option key={p.id}>{p.name} — {p.client}</option>)}</select></div>
-          <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>E-MAIL</div><input placeholder="pessoa@empresa.com" className="border rounded-md px-3 py-2 text-sm w-full" style={{ borderColor: C.border }} /></div>
-          <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>SENHA INICIAL</div><input type="password" defaultValue="123456" className="border rounded-md px-3 py-2 text-sm w-full" style={{ borderColor: C.border }} /></div>
-          <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>PAPEL</div><select className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}><option>Cliente</option><option>Consultor</option><option>Admin</option></select></div>
-          <button className="rounded-md py-2 text-sm font-bold text-white" style={{ background: C.navy }}>Conceder</button>
+        <div className="font-bold text-sm" style={{ color: C.navy }}>Criar conta de acesso</div>
+        <div className="text-[11px] mb-3" style={{ color: C.gray }}>Crie o usuário, defina o papel e, para cliente, o projeto que ele poderá ver</div>
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_130px_130px] gap-3 items-end">
+          <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>NOME</div><input value={novo.nome} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} placeholder="Nome da pessoa" className="border rounded-md px-3 py-2 text-sm w-full" style={{ borderColor: C.border }} /></div>
+          <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>E-MAIL</div><input value={novo.email} onChange={(e) => setNovo({ ...novo, email: e.target.value })} placeholder="pessoa@empresa.com" className="border rounded-md px-3 py-2 text-sm w-full" style={{ borderColor: C.border }} /></div>
+          <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>SENHA INICIAL</div><input type="text" value={novo.senha} onChange={(e) => setNovo({ ...novo, senha: e.target.value })} placeholder="mín. 6 caract." className="border rounded-md px-3 py-2 text-sm w-full" style={{ borderColor: C.border }} /></div>
+          <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>PAPEL</div>
+            <select value={novo.papel} onChange={(e) => setNovo({ ...novo, papel: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}>
+              <option value="cliente">Cliente</option><option value="consultor">Consultor</option><option value="admin">Admin</option>
+            </select></div>
         </div>
-        <div className="text-[10px] font-semibold mt-4 mb-2" style={{ color: C.gray }}>USUÁRIOS COM ACESSO</div>
+        {novo.papel === "cliente" && (
+          <div className="mt-3 max-w-md"><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>PROJETO DO CLIENTE</div>
+            <select value={novo.projetoId} onChange={(e) => setNovo({ ...novo, projetoId: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}>
+              {projetos.map((p) => <option key={p.id} value={p.id}>{p.name} — {p.client}</option>)}
+            </select></div>
+        )}
+        <div className="flex items-center gap-3 mt-4">
+          <button onClick={criar} disabled={saving} className="rounded-md px-5 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.navy }}>{saving ? "Criando…" : "Criar conta"}</button>
+          {msg && <span className="text-sm font-semibold" style={{ color: msg.tipo === "ok" ? C.green : C.red }}>{msg.texto}</span>}
+        </div>
+        <div className="text-[10px] font-semibold mt-5 mb-2" style={{ color: C.gray }}>USUÁRIOS COM ACESSO</div>
         <div className="flex flex-wrap gap-2">
-          {chips.map((c) => <span key={c} className="flex items-center gap-1.5 border rounded-full px-3 py-1 text-xs" style={{ borderColor: C.border, color: C.navy }}>{c} <X size={12} color={C.red} /></span>)}
+          {usuarios.length === 0 && <span className="text-xs" style={{ color: C.gray }}>Nenhum usuário carregado.</span>}
+          {usuarios.map((u) => <span key={u.email} className="flex items-center gap-1.5 border rounded-full px-3 py-1 text-xs" style={{ borderColor: C.border, color: C.navy }}>{u.nome || u.email} · {papelLabel[u.papel] || u.papel}</span>)}
         </div>
       </div>
       {modal && (
@@ -1173,95 +1214,50 @@ function ProjectPicker({ projetos, onPick, onClose }) {
 }
 
 /* ============================ LOGIN ============================ */
-function Login({ onLogin, onSignIn, onRequestReset, onUpdatePassword, loginError, busy, recovery }) {
+function Login({ onLogin, onSignIn, onReset, loginError, busy }) {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
-  // "login" | "forgot" | "sent" | "reset"
-  const [mode, setMode] = useState(recovery ? "reset" : "login");
-  const [resetEmail, setResetEmail] = useState("");
-  const [novaSenha, setNovaSenha] = useState("");
-  const [confirmaSenha, setConfirmaSenha] = useState("");
-  const [localErr, setLocalErr] = useState("");
-
+  const [mode, setMode] = useState("login"); // login | recuperar
+  const [resetSent, setResetSent] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
   const submit = () => { if (email && senha) onSignIn(email, senha); };
-
-  const enviarLink = async () => {
-    setLocalErr("");
-    if (!resetEmail) { setLocalErr("Informe seu e-mail."); return; }
-    try { await onRequestReset(resetEmail); setMode("sent"); }
-    catch { setMode("sent"); } // mensagem neutra mesmo em erro: não revela se o e-mail existe
+  const enviarReset = async () => {
+    if (!email) return;
+    setResetBusy(true);
+    try { await onReset(email); setResetSent(true); } catch (e) { console.error(e); }
+    finally { setResetBusy(false); }
   };
-
-  const salvarSenha = async () => {
-    setLocalErr("");
-    if (novaSenha.length < 6) { setLocalErr("A senha deve ter ao menos 6 caracteres."); return; }
-    if (novaSenha !== confirmaSenha) { setLocalErr("As senhas não conferem."); return; }
-    try { await onUpdatePassword(novaSenha); }
-    catch { setLocalErr("Link expirado ou inválido. Solicite um novo."); }
-  };
-
-  const Shell = ({ children }) => (
+  return (
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "radial-gradient(circle at 30% 20%, #0d2f63, #05122b)" }}>
       <div className="bg-white rounded-2xl p-8 w-full max-w-md shadow-2xl">
         <div className="w-12 h-12 rounded-full border-2 flex items-center justify-center mb-4" style={{ borderColor: C.orange, background: C.navy }}><ChevronRight size={22} color={C.orange} /></div>
         <div className="font-extrabold text-3xl tracking-tight" style={{ color: C.navy }}>pwr<span style={{ color: C.orange }}>.</span></div>
         <div className="text-[10px] tracking-[0.25em] mb-6" style={{ color: C.blue }}>PORTFOLIO · PAINEL CENTRAL</div>
-        {children}
-      </div>
-    </div>
-  );
 
-  // Definir nova senha (chegou pelo link de recuperação)
-  if (mode === "reset") {
-    return (
-      <Shell>
-        <div className="text-sm font-bold mb-1" style={{ color: C.navy }}>Definir nova senha</div>
-        <div className="text-[11px] mb-4" style={{ color: C.gray }}>Escolha uma nova senha para sua conta.</div>
-        <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>NOVA SENHA</div>
-        <input type="password" value={novaSenha} onChange={(e) => setNovaSenha(e.target.value)} placeholder="••••••••" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
-        <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>CONFIRMAR SENHA</div>
-        <input type="password" value={confirmaSenha} onChange={(e) => setConfirmaSenha(e.target.value)} onKeyDown={(e) => e.key === "Enter" && salvarSenha()} placeholder="••••••••" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
-        {localErr && <div className="text-sm mb-3 rounded-md px-3 py-2" style={{ background: "#fee2e2", color: C.red }}>{localErr}</div>}
-        <button onClick={salvarSenha} disabled={busy} className="w-full rounded-md py-2.5 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{busy ? "Salvando…" : "Salvar nova senha"}</button>
-      </Shell>
-    );
-  }
-
-  // Confirmação neutra após pedir o link
-  if (mode === "sent") {
-    return (
-      <Shell>
-        <div className="text-sm font-bold mb-2" style={{ color: C.navy }}>Verifique seu e-mail</div>
-        <div className="text-[13px] mb-5" style={{ color: C.navyMed }}>Se este e-mail estiver cadastrado, enviamos um link de recuperação. Confira sua caixa de entrada.</div>
-        <button onClick={() => { setMode("login"); setResetEmail(""); }} className="w-full rounded-md py-2.5 text-sm font-bold text-white" style={{ background: C.orange }}>Voltar ao login</button>
-      </Shell>
-    );
-  }
-
-  // Solicitar link de recuperação
-  if (mode === "forgot") {
-    return (
-      <Shell>
-        <div className="text-sm font-bold mb-1" style={{ color: C.navy }}>Recuperar senha</div>
-        <div className="text-[11px] mb-4" style={{ color: C.gray }}>Informe seu e-mail e enviaremos um link para redefinir a senha.</div>
-        <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>E-MAIL</div>
-        <input value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarLink()} placeholder="voce@empresa.com" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
-        {localErr && <div className="text-sm mb-3 rounded-md px-3 py-2" style={{ background: "#fee2e2", color: C.red }}>{localErr}</div>}
-        <button onClick={enviarLink} disabled={busy} className="w-full rounded-md py-2.5 text-sm font-bold text-white disabled:opacity-60 mb-3" style={{ background: C.orange }}>{busy ? "Enviando…" : "Enviar link de recuperação"}</button>
-        <button onClick={() => { setMode("login"); setLocalErr(""); }} className="w-full text-[12px] font-semibold" style={{ color: C.blue }}>Voltar ao login</button>
-      </Shell>
-    );
-  }
-
-  return (
-    <Shell>
-        {hasSupabase ? (
+        {hasSupabase && mode === "recuperar" ? (
+          <>
+            <div className="font-bold text-lg mb-1" style={{ color: C.navy }}>Recuperar senha</div>
+            {resetSent ? (
+              <div className="text-sm rounded-md px-3 py-3 mb-4" style={{ background: "#dcfce7", color: C.green }}>
+                Enviamos um link de recuperação para <b>{email}</b>. Abra o e-mail e clique no link para definir uma nova senha.
+              </div>
+            ) : (
+              <>
+                <p className="text-[13px] mb-4" style={{ color: C.gray }}>Informe seu e-mail. Enviaremos um link para você criar uma nova senha.</p>
+                <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>E-MAIL</div>
+                <input value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarReset()} placeholder="voce@empresa.com" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
+                <button onClick={enviarReset} disabled={resetBusy} className="w-full rounded-md py-2.5 text-sm font-bold text-white disabled:opacity-60 mb-3" style={{ background: C.orange }}>{resetBusy ? "Enviando…" : "Enviar link de recuperação"}</button>
+              </>
+            )}
+            <button onClick={() => { setMode("login"); setResetSent(false); }} className="w-full text-sm font-semibold" style={{ color: C.blue }}>← Voltar ao login</button>
+          </>
+        ) : hasSupabase ? (
           <>
             <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>E-MAIL</div>
             <input value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="voce@empresa.com" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
             <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>SENHA</div>
             <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="••••••••" className="border rounded-md px-3 py-2.5 text-sm w-full mb-2" style={{ borderColor: C.border }} />
-            <button onClick={() => { setMode("forgot"); setLocalErr(""); }} className="text-[12px] font-semibold mb-4" style={{ color: C.blue }}>Esqueci minha senha</button>
+            <button onClick={() => setMode("recuperar")} className="text-[13px] font-semibold mb-4 block" style={{ color: C.blue }}>Esqueci minha senha</button>
             {loginError && <div className="text-sm mb-3 rounded-md px-3 py-2" style={{ background: "#fee2e2", color: C.red }}>{loginError}</div>}
             <button onClick={submit} disabled={busy} className="w-full rounded-md py-2.5 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{busy ? "Entrando…" : "Entrar"}</button>
           </>
@@ -1280,7 +1276,37 @@ function Login({ onLogin, onSignIn, onRequestReset, onUpdatePassword, loginError
             </div>
           </>
         )}
-    </Shell>
+      </div>
+    </div>
+  );
+}
+
+function ResetPassword({ onDone }) {
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const salvar = async () => {
+    if (pw.length < 6) { setErr("A senha precisa ter ao menos 6 caracteres."); return; }
+    if (pw !== pw2) { setErr("As senhas não conferem."); return; }
+    setErr(""); setBusy(true);
+    try { await onDone(pw); } catch (e) { setErr("Não foi possível salvar. Tente o link novamente."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "radial-gradient(circle at 30% 20%, #0d2f63, #05122b)" }}>
+      <div className="bg-white rounded-2xl p-8 w-full max-w-md shadow-2xl">
+        <div className="w-12 h-12 rounded-full border-2 flex items-center justify-center mb-4" style={{ borderColor: C.orange, background: C.navy }}><ChevronRight size={22} color={C.orange} /></div>
+        <div className="font-extrabold text-2xl tracking-tight mb-1" style={{ color: C.navy }}>Definir nova senha</div>
+        <p className="text-[13px] mb-5" style={{ color: C.gray }}>Digite a nova senha de acesso ao sistema.</p>
+        <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>NOVA SENHA</div>
+        <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
+        <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>CONFIRMAR SENHA</div>
+        <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} onKeyDown={(e) => e.key === "Enter" && salvar()} placeholder="••••••••" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
+        {err && <div className="text-sm mb-3 rounded-md px-3 py-2" style={{ background: "#fee2e2", color: C.red }}>{err}</div>}
+        <button onClick={salvar} disabled={busy} className="w-full rounded-md py-2.5 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{busy ? "Salvando…" : "Salvar e entrar"}</button>
+      </div>
+    </div>
   );
 }
 
@@ -1302,11 +1328,8 @@ export default function App() {
   const [authReady, setAuthReady] = useState(!hasSupabase);
   const [loginError, setLoginError] = useState("");
   const [busy, setBusy] = useState(false);
-  // modo de recuperação de senha: ativado pelo link do e-mail (?recovery=1
-  // na URL ou evento PASSWORD_RECOVERY do Supabase)
-  const [recovery, setRecovery] = useState(
-    typeof window !== "undefined" && new URLSearchParams(window.location.search).has("recovery")
-  );
+  const [recovery, setRecovery] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const [acoesState, setAcoesState] = useState(GOSTO_ACOES);
   const [respState, setRespState] = useState(RESPONSAVEIS);
@@ -1334,14 +1357,13 @@ export default function App() {
   };
   useEffect(() => {
     if (!hasSupabase) return;
-    const emRecovery = new URLSearchParams(window.location.search).has("recovery");
+    const isRecovery = window.location.hash.includes("type=recovery");
     supabase.auth.getSession().then(({ data }) => {
-      if (emRecovery) { setRecovery(true); setAuthReady(true); return; }
+      if (isRecovery) { setRecovery(true); setAuthReady(true); return; }
       if (data.session) bootstrap(); else setAuthReady(true);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((ev, session) => {
       if (ev === "INITIAL_SESSION") return;
-      // link de recuperação: entra em modo "definir nova senha" em vez de logar
       if (ev === "PASSWORD_RECOVERY") { setRecovery(true); setAuthReady(true); return; }
       if (session) bootstrap(); else { setLogged(false); setPerfil(null); }
     });
@@ -1357,21 +1379,6 @@ export default function App() {
   const handleLogout = async () => {
     if (hasSupabase) { try { await api.signOut(); } catch (e) { console.error(e); } }
     setLogged(false); setPerfil(null);
-  };
-  const handleRequestReset = async (email) => {
-    setBusy(true);
-    try { await api.requestPasswordReset(email); }
-    finally { setBusy(false); }
-  };
-  const handleUpdatePassword = async (novaSenha) => {
-    setBusy(true);
-    try {
-      await api.updatePassword(novaSenha);
-      // limpa ?recovery=1 da URL e volta ao fluxo normal (já logado)
-      window.history.replaceState({}, "", window.location.pathname);
-      setRecovery(false);
-      await bootstrap();
-    } finally { setBusy(false); }
   };
 
   // carrega projetos + solicitações ao logar
@@ -1485,24 +1492,17 @@ export default function App() {
     setAtaFilled(true);
   };
 
+  const handleCreateUser = async (payload) => { await api.createUserAsAdmin(payload); };
+
   const dashData = useMemo(() => buildDashboard(acoesState), [acoesState]);
 
+  if (hasSupabase && recovery) return <ResetPassword onDone={async (pw) => { await api.updatePassword(pw); setRecovery(false); if (window.history.replaceState) window.history.replaceState(null, "", window.location.pathname); bootstrap(); }} />;
   if (hasSupabase && !authReady) return (
     <div className="min-h-screen grid place-items-center" style={{ background: C.page }}>
       <span className="text-sm" style={{ color: C.gray }}>Carregando…</span>
     </div>
   );
-  if (recovery || !logged) return (
-    <Login
-      onLogin={login}
-      onSignIn={handleSignIn}
-      onRequestReset={handleRequestReset}
-      onUpdatePassword={handleUpdatePassword}
-      loginError={loginError}
-      busy={busy}
-      recovery={recovery}
-    />
-  );
+  if (!logged) return <Login onLogin={login} onSignIn={handleSignIn} onReset={api.resetPassword} loginError={loginError} busy={busy} />;
 
   const canSwitchRole = !hasSupabase || perfil?.papel === "admin";
 
@@ -1519,16 +1519,16 @@ export default function App() {
       case "responsaveis": return <Responsaveis project={project} responsaveis={respState} actions={acoesState} onCreate={handleCreateResponsavel} />;
       case "documentos": return <Documentos project={project} documentos={docState} onCreate={handleCreateDocumento} />;
       case "solicitacoes": return <Solicitacoes solicitacoes={solic} onCreate={handleCreateSolicitacao} />;
-      case "administracao": return <Administracao projetos={projetos} />;
+      case "administracao": return <Administracao projetos={projetos} onCreateUser={handleCreateUser} />;
       default: return null;
     }
   };
 
   return (
     <div className="flex h-screen text-[15px]" style={{ background: C.page, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
-      <Sidebar role={role} page={page} setPage={setPage} acoesCount={acoesState.length} />
+      <Sidebar role={role} page={page} setPage={setPage} acoesCount={acoesState.length} collapsed={sidebarCollapsed} />
       <div className="flex-1 flex flex-col min-w-0">
-        <TopBar role={role} setRole={changeRole} page={page} project={project} openProjectPicker={() => setPicker(true)} onLogout={handleLogout} dbStatus={dbStatus} canSwitchRole={canSwitchRole} />
+        <TopBar role={role} setRole={changeRole} page={page} project={project} openProjectPicker={() => setPicker(true)} onLogout={handleLogout} dbStatus={dbStatus} canSwitchRole={canSwitchRole} onToggleSidebar={() => setSidebarCollapsed((v) => !v)} />
         <main className="flex-1 overflow-y-auto p-6">{render()}</main>
       </div>
       {picker && <ProjectPicker projetos={projetos} onPick={(p) => { setProject(p); setPicker(false); }} onClose={() => setPicker(false)} />}

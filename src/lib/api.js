@@ -1,4 +1,4 @@
-import { supabase } from './supabase'
+import { supabase, makeAuxClient } from './supabase'
 
 // ---- helpers de data ----
 export const fmt = (d) => {
@@ -154,4 +154,26 @@ export async function getPerfil() {
   const { data, error } = await supabase.from('perfis').select('papel, nome, email').eq('id', u.user.id).single()
   if (error) throw error
   return data
+}
+
+// ---- ADMIN: LISTAR E CRIAR USUÁRIOS ----
+export async function listUsuarios() {
+  const { data, error } = await supabase.from('perfis').select('email, nome, papel').order('papel')
+  if (error) throw error
+  return data
+}
+export async function createUserAsAdmin({ email, password, papel, nome, projetoId }) {
+  const aux = makeAuxClient()
+  if (!aux) throw new Error('Banco não conectado.')
+  const { data, error } = await aux.auth.signUp({ email, password })
+  if (error) throw error
+  const uid = data.user?.id
+  if (!uid) throw new Error('Não foi possível criar o usuário (e-mail já existe?).')
+  const { error: e2 } = await supabase.from('perfis').upsert({ id: uid, email, nome: nome || email, papel })
+  if (e2) throw e2
+  if (papel === 'cliente' && projetoId) {
+    const { error: e3 } = await supabase.from('projeto_acessos').upsert({ projeto_id: projetoId, user_id: uid, papel: 'cliente' })
+    if (e3) throw e3
+  }
+  return uid
 }
