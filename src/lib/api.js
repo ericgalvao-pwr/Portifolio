@@ -135,6 +135,19 @@ export async function signIn(email, password) {
 export async function signOut() {
   await supabase.auth.signOut()
 }
+// Envia o e-mail com o link de recuperação de senha.
+// O link traz a pessoa de volta ao app com ?recovery=1.
+export async function requestPasswordReset(email) {
+  const redirectTo = `${window.location.origin}${window.location.pathname}?recovery=1`
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
+  if (error) throw error
+}
+// Define a nova senha. Só tem efeito dentro de uma sessão de recuperação
+// ativa (garantida pelo Supabase quando a pessoa chega pelo link do e-mail).
+export async function updatePassword(novaSenha) {
+  const { error } = await supabase.auth.updateUser({ password: novaSenha })
+  if (error) throw error
+}
 export async function getPerfil() {
   const { data: u } = await supabase.auth.getUser()
   if (!u?.user) return null

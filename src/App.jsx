@@ -1173,23 +1173,95 @@ function ProjectPicker({ projetos, onPick, onClose }) {
 }
 
 /* ============================ LOGIN ============================ */
-function Login({ onLogin, onSignIn, loginError, busy }) {
+function Login({ onLogin, onSignIn, onRequestReset, onUpdatePassword, loginError, busy, recovery }) {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
+  // "login" | "forgot" | "sent" | "reset"
+  const [mode, setMode] = useState(recovery ? "reset" : "login");
+  const [resetEmail, setResetEmail] = useState("");
+  const [novaSenha, setNovaSenha] = useState("");
+  const [confirmaSenha, setConfirmaSenha] = useState("");
+  const [localErr, setLocalErr] = useState("");
+
   const submit = () => { if (email && senha) onSignIn(email, senha); };
-  return (
+
+  const enviarLink = async () => {
+    setLocalErr("");
+    if (!resetEmail) { setLocalErr("Informe seu e-mail."); return; }
+    try { await onRequestReset(resetEmail); setMode("sent"); }
+    catch { setMode("sent"); } // mensagem neutra mesmo em erro: não revela se o e-mail existe
+  };
+
+  const salvarSenha = async () => {
+    setLocalErr("");
+    if (novaSenha.length < 6) { setLocalErr("A senha deve ter ao menos 6 caracteres."); return; }
+    if (novaSenha !== confirmaSenha) { setLocalErr("As senhas não conferem."); return; }
+    try { await onUpdatePassword(novaSenha); }
+    catch { setLocalErr("Link expirado ou inválido. Solicite um novo."); }
+  };
+
+  const Shell = ({ children }) => (
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "radial-gradient(circle at 30% 20%, #0d2f63, #05122b)" }}>
       <div className="bg-white rounded-2xl p-8 w-full max-w-md shadow-2xl">
         <div className="w-12 h-12 rounded-full border-2 flex items-center justify-center mb-4" style={{ borderColor: C.orange, background: C.navy }}><ChevronRight size={22} color={C.orange} /></div>
         <div className="font-extrabold text-3xl tracking-tight" style={{ color: C.navy }}>pwr<span style={{ color: C.orange }}>.</span></div>
         <div className="text-[10px] tracking-[0.25em] mb-6" style={{ color: C.blue }}>PORTFOLIO · PAINEL CENTRAL</div>
+        {children}
+      </div>
+    </div>
+  );
 
+  // Definir nova senha (chegou pelo link de recuperação)
+  if (mode === "reset") {
+    return (
+      <Shell>
+        <div className="text-sm font-bold mb-1" style={{ color: C.navy }}>Definir nova senha</div>
+        <div className="text-[11px] mb-4" style={{ color: C.gray }}>Escolha uma nova senha para sua conta.</div>
+        <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>NOVA SENHA</div>
+        <input type="password" value={novaSenha} onChange={(e) => setNovaSenha(e.target.value)} placeholder="••••••••" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
+        <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>CONFIRMAR SENHA</div>
+        <input type="password" value={confirmaSenha} onChange={(e) => setConfirmaSenha(e.target.value)} onKeyDown={(e) => e.key === "Enter" && salvarSenha()} placeholder="••••••••" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
+        {localErr && <div className="text-sm mb-3 rounded-md px-3 py-2" style={{ background: "#fee2e2", color: C.red }}>{localErr}</div>}
+        <button onClick={salvarSenha} disabled={busy} className="w-full rounded-md py-2.5 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{busy ? "Salvando…" : "Salvar nova senha"}</button>
+      </Shell>
+    );
+  }
+
+  // Confirmação neutra após pedir o link
+  if (mode === "sent") {
+    return (
+      <Shell>
+        <div className="text-sm font-bold mb-2" style={{ color: C.navy }}>Verifique seu e-mail</div>
+        <div className="text-[13px] mb-5" style={{ color: C.navyMed }}>Se este e-mail estiver cadastrado, enviamos um link de recuperação. Confira sua caixa de entrada.</div>
+        <button onClick={() => { setMode("login"); setResetEmail(""); }} className="w-full rounded-md py-2.5 text-sm font-bold text-white" style={{ background: C.orange }}>Voltar ao login</button>
+      </Shell>
+    );
+  }
+
+  // Solicitar link de recuperação
+  if (mode === "forgot") {
+    return (
+      <Shell>
+        <div className="text-sm font-bold mb-1" style={{ color: C.navy }}>Recuperar senha</div>
+        <div className="text-[11px] mb-4" style={{ color: C.gray }}>Informe seu e-mail e enviaremos um link para redefinir a senha.</div>
+        <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>E-MAIL</div>
+        <input value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && enviarLink()} placeholder="voce@empresa.com" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
+        {localErr && <div className="text-sm mb-3 rounded-md px-3 py-2" style={{ background: "#fee2e2", color: C.red }}>{localErr}</div>}
+        <button onClick={enviarLink} disabled={busy} className="w-full rounded-md py-2.5 text-sm font-bold text-white disabled:opacity-60 mb-3" style={{ background: C.orange }}>{busy ? "Enviando…" : "Enviar link de recuperação"}</button>
+        <button onClick={() => { setMode("login"); setLocalErr(""); }} className="w-full text-[12px] font-semibold" style={{ color: C.blue }}>Voltar ao login</button>
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell>
         {hasSupabase ? (
           <>
             <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>E-MAIL</div>
             <input value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="voce@empresa.com" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
             <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>SENHA</div>
-            <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="••••••••" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
+            <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="••••••••" className="border rounded-md px-3 py-2.5 text-sm w-full mb-2" style={{ borderColor: C.border }} />
+            <button onClick={() => { setMode("forgot"); setLocalErr(""); }} className="text-[12px] font-semibold mb-4" style={{ color: C.blue }}>Esqueci minha senha</button>
             {loginError && <div className="text-sm mb-3 rounded-md px-3 py-2" style={{ background: "#fee2e2", color: C.red }}>{loginError}</div>}
             <button onClick={submit} disabled={busy} className="w-full rounded-md py-2.5 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{busy ? "Entrando…" : "Entrar"}</button>
           </>
@@ -1208,8 +1280,7 @@ function Login({ onLogin, onSignIn, loginError, busy }) {
             </div>
           </>
         )}
-      </div>
-    </div>
+    </Shell>
   );
 }
 
@@ -1231,6 +1302,11 @@ export default function App() {
   const [authReady, setAuthReady] = useState(!hasSupabase);
   const [loginError, setLoginError] = useState("");
   const [busy, setBusy] = useState(false);
+  // modo de recuperação de senha: ativado pelo link do e-mail (?recovery=1
+  // na URL ou evento PASSWORD_RECOVERY do Supabase)
+  const [recovery, setRecovery] = useState(
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).has("recovery")
+  );
 
   const [acoesState, setAcoesState] = useState(GOSTO_ACOES);
   const [respState, setRespState] = useState(RESPONSAVEIS);
@@ -1258,9 +1334,15 @@ export default function App() {
   };
   useEffect(() => {
     if (!hasSupabase) return;
-    supabase.auth.getSession().then(({ data }) => { if (data.session) bootstrap(); else setAuthReady(true); });
+    const emRecovery = new URLSearchParams(window.location.search).has("recovery");
+    supabase.auth.getSession().then(({ data }) => {
+      if (emRecovery) { setRecovery(true); setAuthReady(true); return; }
+      if (data.session) bootstrap(); else setAuthReady(true);
+    });
     const { data: sub } = supabase.auth.onAuthStateChange((ev, session) => {
       if (ev === "INITIAL_SESSION") return;
+      // link de recuperação: entra em modo "definir nova senha" em vez de logar
+      if (ev === "PASSWORD_RECOVERY") { setRecovery(true); setAuthReady(true); return; }
       if (session) bootstrap(); else { setLogged(false); setPerfil(null); }
     });
     return () => sub.subscription.unsubscribe();
@@ -1275,6 +1357,21 @@ export default function App() {
   const handleLogout = async () => {
     if (hasSupabase) { try { await api.signOut(); } catch (e) { console.error(e); } }
     setLogged(false); setPerfil(null);
+  };
+  const handleRequestReset = async (email) => {
+    setBusy(true);
+    try { await api.requestPasswordReset(email); }
+    finally { setBusy(false); }
+  };
+  const handleUpdatePassword = async (novaSenha) => {
+    setBusy(true);
+    try {
+      await api.updatePassword(novaSenha);
+      // limpa ?recovery=1 da URL e volta ao fluxo normal (já logado)
+      window.history.replaceState({}, "", window.location.pathname);
+      setRecovery(false);
+      await bootstrap();
+    } finally { setBusy(false); }
   };
 
   // carrega projetos + solicitações ao logar
@@ -1395,7 +1492,17 @@ export default function App() {
       <span className="text-sm" style={{ color: C.gray }}>Carregando…</span>
     </div>
   );
-  if (!logged) return <Login onLogin={login} onSignIn={handleSignIn} loginError={loginError} busy={busy} />;
+  if (recovery || !logged) return (
+    <Login
+      onLogin={login}
+      onSignIn={handleSignIn}
+      onRequestReset={handleRequestReset}
+      onUpdatePassword={handleUpdatePassword}
+      loginError={loginError}
+      busy={busy}
+      recovery={recovery}
+    />
+  );
 
   const canSwitchRole = !hasSupabase || perfil?.papel === "admin";
 
