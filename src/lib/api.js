@@ -135,19 +135,6 @@ export async function signIn(email, password) {
 export async function signOut() {
   await supabase.auth.signOut()
 }
-// Envia o e-mail com o link de recuperação de senha.
-// O link traz a pessoa de volta ao app com ?recovery=1.
-export async function requestPasswordReset(email) {
-  const redirectTo = `${window.location.origin}${window.location.pathname}?recovery=1`
-  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
-  if (error) throw error
-}
-// Define a nova senha. Só tem efeito dentro de uma sessão de recuperação
-// ativa (garantida pelo Supabase quando a pessoa chega pelo link do e-mail).
-export async function updatePassword(novaSenha) {
-  const { error } = await supabase.auth.updateUser({ password: novaSenha })
-  if (error) throw error
-}
 export async function getPerfil() {
   const { data: u } = await supabase.auth.getUser()
   if (!u?.user) return null
@@ -156,7 +143,17 @@ export async function getPerfil() {
   return data
 }
 
-// ---- ADMIN: LISTAR E CRIAR USUÁRIOS ----
+// ---- RECUPERAÇÃO DE SENHA ----
+export async function resetPassword(email) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })
+  if (error) throw error
+}
+export async function updatePassword(novaSenha) {
+  const { error } = await supabase.auth.updateUser({ password: novaSenha })
+  if (error) throw error
+}
+
+// ---- ADMIN: CRIAR CONTA + PERMISSÕES ----
 export async function listUsuarios() {
   const { data, error } = await supabase.from('perfis').select('email, nome, papel').order('papel')
   if (error) throw error
@@ -176,4 +173,14 @@ export async function createUserAsAdmin({ email, password, papel, nome, projetoI
     if (e3) throw e3
   }
   return uid
+}
+
+// ---- ADMIN: REDEFINIR SENHA DE OUTRO USUÁRIO (via Edge Function) ----
+export async function resetSenhaUsuario(email, novaSenha) {
+  const { data, error } = await supabase.functions.invoke('admin-reset-senha', {
+    body: { email, novaSenha },
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data
 }

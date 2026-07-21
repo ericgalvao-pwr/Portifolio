@@ -1068,16 +1068,32 @@ function Solicitacoes({ solicitacoes, onCreate }) {
   );
 }
 
-function Administracao({ projetos, onCreateUser }) {
+function Administracao({ projetos, onCreateUser, onResetSenha }) {
   const [modal, setModal] = useState(false);
   const [usuarios, setUsuarios] = useState([]);
   const [novo, setNovo] = useState({ nome: "", email: "", senha: "", papel: "cliente", projetoId: projetos[0]?.id || "" });
   const [msg, setMsg] = useState(null); // {tipo:'ok'|'erro', texto}
   const [saving, setSaving] = useState(false);
+  const [resetAlvo, setResetAlvo] = useState(null);
+  const [resetPw, setResetPw] = useState("");
+  const [resetMsg, setResetMsg] = useState(null);
+  const [resetting, setResetting] = useState(false);
   const papelLabel = { admin: "Admin", consultor: "Consultor", cliente: "Cliente" };
 
+  const fazerReset = async () => {
+    if (resetPw.length < 6) { setResetMsg({ tipo: "erro", texto: "Mínimo de 6 caracteres." }); return; }
+    setResetting(true); setResetMsg(null);
+    try {
+      await onResetSenha({ email: resetAlvo, novaSenha: resetPw });
+      setResetMsg({ tipo: "ok", texto: "Senha redefinida com sucesso." });
+      setResetPw("");
+    } catch (e) {
+      setResetMsg({ tipo: "erro", texto: e.message || "Falha ao redefinir." });
+    } finally { setResetting(false); }
+  };
+
   const carregarUsuarios = () => {
-    if (!hasSupabase) return;
+    if (!hasSupabase || typeof api.listUsuarios !== "function") return;
     api.listUsuarios().then(setUsuarios).catch((e) => console.error("usuarios:", e.message));
   };
   useEffect(() => { carregarUsuarios(); }, []);
@@ -1141,11 +1157,30 @@ function Administracao({ projetos, onCreateUser }) {
           {msg && <span className="text-sm font-semibold" style={{ color: msg.tipo === "ok" ? C.green : C.red }}>{msg.texto}</span>}
         </div>
         <div className="text-[10px] font-semibold mt-5 mb-2" style={{ color: C.gray }}>USUÁRIOS COM ACESSO</div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-col gap-2">
           {usuarios.length === 0 && <span className="text-xs" style={{ color: C.gray }}>Nenhum usuário carregado.</span>}
-          {usuarios.map((u) => <span key={u.email} className="flex items-center gap-1.5 border rounded-full px-3 py-1 text-xs" style={{ borderColor: C.border, color: C.navy }}>{u.nome || u.email} · {papelLabel[u.papel] || u.papel}</span>)}
+          {usuarios.map((u) => (
+            <div key={u.email} className="flex items-center gap-3 border rounded-md px-3 py-2" style={{ borderColor: C.border }}>
+              <span className="text-sm font-semibold" style={{ color: C.navy }}>{u.nome || u.email}</span>
+              <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: "#eef1f6", color: C.blue }}>{papelLabel[u.papel] || u.papel}</span>
+              <span className="text-[11px]" style={{ color: C.gray }}>{u.email}</span>
+              <button onClick={() => { setResetAlvo(u.email); setResetPw(""); setResetMsg(null); }} className="ml-auto border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Redefinir senha</button>
+            </div>
+          ))}
         </div>
       </div>
+      {resetAlvo && (
+        <Modal title="Redefinir senha" onClose={() => setResetAlvo(null)}>
+          <p className="text-[13px] mb-3" style={{ color: C.gray }}>Definindo nova senha para <b>{resetAlvo}</b>.</p>
+          <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>NOVA SENHA</div>
+          <input type="text" value={resetPw} onChange={(e) => setResetPw(e.target.value)} placeholder="mín. 6 caracteres" className="border rounded-md px-3 py-2 text-sm w-full mb-3" style={{ borderColor: C.border }} />
+          {resetMsg && <div className="text-sm mb-3 rounded-md px-3 py-2" style={{ background: resetMsg.tipo === "ok" ? "#dcfce7" : "#fee2e2", color: resetMsg.tipo === "ok" ? C.green : C.red }}>{resetMsg.texto}</div>}
+          <div className="flex gap-2">
+            <button onClick={fazerReset} disabled={resetting} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{resetting ? "Salvando…" : "Salvar nova senha"}</button>
+            <button onClick={() => setResetAlvo(null)} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Fechar</button>
+          </div>
+        </Modal>
+      )}
       {modal && (
         <Modal title="Novo projeto / cliente" onClose={() => setModal(false)}>
           <LabeledInput label="NOME DO PROJETO" ph="Ex: Nova Indústria" />
@@ -1493,6 +1528,7 @@ export default function App() {
   };
 
   const handleCreateUser = async (payload) => { await api.createUserAsAdmin(payload); };
+  const handleResetSenha = async ({ email, novaSenha }) => { await api.resetSenhaUsuario(email, novaSenha); };
 
   const dashData = useMemo(() => buildDashboard(acoesState), [acoesState]);
 
@@ -1519,7 +1555,7 @@ export default function App() {
       case "responsaveis": return <Responsaveis project={project} responsaveis={respState} actions={acoesState} onCreate={handleCreateResponsavel} />;
       case "documentos": return <Documentos project={project} documentos={docState} onCreate={handleCreateDocumento} />;
       case "solicitacoes": return <Solicitacoes solicitacoes={solic} onCreate={handleCreateSolicitacao} />;
-      case "administracao": return <Administracao projetos={projetos} onCreateUser={handleCreateUser} />;
+      case "administracao": return <Administracao projetos={projetos} onCreateUser={handleCreateUser} onResetSenha={handleResetSenha} />;
       default: return null;
     }
   };
