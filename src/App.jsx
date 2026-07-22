@@ -7,6 +7,7 @@ import {
   LayoutGrid, Map, BarChart3, AlignLeft, ListChecks, Columns3, FileText,
   PenLine, Users, File as FileIcon, MessageSquare, Settings, ChevronRight,
   ChevronDown, X, Plus, Download, Upload, LogOut, Menu, Sparkles, ExternalLink,
+  Eye, EyeOff, KeyRound,
 } from "lucide-react";
 import { hasSupabase, supabase } from "./lib/supabase";
 import * as api from "./lib/api";
@@ -263,15 +264,11 @@ function Sidebar({ role, page, setPage, acoesCount, collapsed }) {
   const items = NAV.filter((n) => pages.includes(n.id));
   return (
     <aside className="shrink-0 flex flex-col text-white transition-all duration-200" style={{ background: C.sidebar, width: collapsed ? 64 : 224 }}>
-      <div className={`py-4 flex items-center gap-2.5 border-b ${collapsed ? "px-0 justify-center" : "px-5"}`} style={{ borderColor: "#ffffff14" }}>
-        <div className="w-8 h-8 rounded-full border-2 flex items-center justify-center shrink-0" style={{ borderColor: C.orange }}>
-          <ChevronRight size={16} color={C.orange} />
-        </div>
-        {!collapsed && (
-          <div className="leading-none">
-            <div className="font-extrabold text-lg tracking-tight">pwr<span style={{ color: C.orange }}>.</span></div>
-            <div className="text-[8px] tracking-[0.2em] mt-0.5" style={{ color: "#7f93b5" }}>GESTÃO · PORTFOLIO</div>
-          </div>
+      <div className={`py-4 flex items-center border-b ${collapsed ? "px-0 justify-center" : "px-5"}`} style={{ borderColor: "#ffffff14" }}>
+        {collapsed ? (
+          <img src="/logo-mark.svg" alt="PWR" style={{ width: 30, height: 30 }} />
+        ) : (
+          <img src="/logo-branco.svg" alt="PWR Gestão" style={{ height: 30 }} />
         )}
       </div>
       <nav className="flex-1 py-3 overflow-y-auto overflow-x-hidden">
@@ -310,7 +307,7 @@ function DbBadge({ status }) {
   );
 }
 
-function TopBar({ role, setRole, page, project, openProjectPicker, onLogout, dbStatus, canSwitchRole, onToggleSidebar }) {
+function TopBar({ role, setRole, page, project, openProjectPicker, onLogout, dbStatus, canSwitchRole, onToggleSidebar, onChangePw }) {
   const isProjectLevel = NAV.find((n) => n.id === page)?.level === "project";
   const title = NAV.find((n) => n.id === page)?.label || "";
   const crumbProj = isProjectLevel && project ? project.name : "PWR Gestão";
@@ -345,6 +342,11 @@ function TopBar({ role, setRole, page, project, openProjectPicker, onLogout, dbS
           </div>
         ) : (
           <span className="text-sm font-bold px-3 py-1.5 rounded-md" style={{ background: "#eef1f6", color: C.navy }}>{ROLE_LABEL[role]}</span>
+        )}
+        {hasSupabase && (
+          <button onClick={onChangePw} className="w-8 h-8 rounded-full border flex items-center justify-center" style={{ borderColor: C.border }} title="Alterar minha senha">
+            <KeyRound size={14} color={C.gray} />
+          </button>
         )}
         <button onClick={onLogout} className="w-8 h-8 rounded-full border flex items-center justify-center" style={{ borderColor: C.border }} title="Sair">
           <LogOut size={14} color={C.gray} />
@@ -1216,6 +1218,20 @@ function Modal({ title, children, onClose }) {
     </div>
   );
 }
+function PwInput({ value, onChange, onEnter, placeholder = "••••••••", wrap = "mb-4" }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className={`relative ${wrap}`}>
+      <input type={show ? "text" : "password"} value={value} onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && onEnter && onEnter()} placeholder={placeholder}
+        className="border rounded-md px-3 py-2.5 text-sm w-full pr-10" style={{ borderColor: C.border }} />
+      <button type="button" onClick={() => setShow((s) => !s)} tabIndex={-1} className="absolute right-2.5 top-1/2 -translate-y-1/2" title={show ? "Ocultar" : "Mostrar"}>
+        {show ? <EyeOff size={16} color={C.gray} /> : <Eye size={16} color={C.gray} />}
+      </button>
+    </div>
+  );
+}
+
 function LabeledInput({ label, ph, value, defaultValue, onChange }) {
   return (
     <div className="mb-3">
@@ -1225,6 +1241,34 @@ function LabeledInput({ label, ph, value, defaultValue, onChange }) {
     </div>
   );
 }
+function ChangePasswordModal({ onClose }) {
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const salvar = async () => {
+    if (pw.length < 6) { setMsg({ tipo: "erro", texto: "Mínimo de 6 caracteres." }); return; }
+    if (pw !== pw2) { setMsg({ tipo: "erro", texto: "As senhas não conferem." }); return; }
+    setBusy(true); setMsg(null);
+    try { await api.updatePassword(pw); setMsg({ tipo: "ok", texto: "Senha alterada com sucesso." }); setPw(""); setPw2(""); }
+    catch (e) { setMsg({ tipo: "erro", texto: e.message || "Falha ao alterar a senha." }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Modal title="Alterar minha senha" onClose={onClose}>
+      <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>NOVA SENHA</div>
+      <PwInput value={pw} onChange={setPw} />
+      <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>CONFIRMAR SENHA</div>
+      <PwInput value={pw2} onChange={setPw2} onEnter={salvar} />
+      {msg && <div className="text-sm mb-3 rounded-md px-3 py-2" style={{ background: msg.tipo === "ok" ? "#dcfce7" : "#fee2e2", color: msg.tipo === "ok" ? C.green : C.red }}>{msg.texto}</div>}
+      <div className="flex gap-2">
+        <button onClick={salvar} disabled={busy} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{busy ? "Salvando…" : "Salvar"}</button>
+        <button onClick={onClose} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Fechar</button>
+      </div>
+    </Modal>
+  );
+}
+
 function ProjectPicker({ projetos, onPick, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "#05244f66" }}>
@@ -1265,8 +1309,7 @@ function Login({ onLogin, onSignIn, onReset, loginError, busy }) {
   return (
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "radial-gradient(circle at 30% 20%, #0d2f63, #05122b)" }}>
       <div className="bg-white rounded-2xl p-8 w-full max-w-md shadow-2xl">
-        <div className="w-12 h-12 rounded-full border-2 flex items-center justify-center mb-4" style={{ borderColor: C.orange, background: C.navy }}><ChevronRight size={22} color={C.orange} /></div>
-        <div className="font-extrabold text-3xl tracking-tight" style={{ color: C.navy }}>pwr<span style={{ color: C.orange }}>.</span></div>
+        <img src="/logo.svg" alt="PWR Gestão" className="h-14 mb-4" />
         <div className="text-[10px] tracking-[0.25em] mb-6" style={{ color: C.blue }}>PORTFOLIO · PAINEL CENTRAL</div>
 
         {hasSupabase && mode === "recuperar" ? (
@@ -1291,7 +1334,7 @@ function Login({ onLogin, onSignIn, onReset, loginError, busy }) {
             <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>E-MAIL</div>
             <input value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="voce@empresa.com" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
             <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>SENHA</div>
-            <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="••••••••" className="border rounded-md px-3 py-2.5 text-sm w-full mb-2" style={{ borderColor: C.border }} />
+            <PwInput value={senha} onChange={setSenha} onEnter={submit} wrap="mb-2" />
             <button onClick={() => setMode("recuperar")} className="text-[13px] font-semibold mb-4 block" style={{ color: C.blue }}>Esqueci minha senha</button>
             {loginError && <div className="text-sm mb-3 rounded-md px-3 py-2" style={{ background: "#fee2e2", color: C.red }}>{loginError}</div>}
             <button onClick={submit} disabled={busy} className="w-full rounded-md py-2.5 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{busy ? "Entrando…" : "Entrar"}</button>
@@ -1331,13 +1374,13 @@ function ResetPassword({ onDone }) {
   return (
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: "radial-gradient(circle at 30% 20%, #0d2f63, #05122b)" }}>
       <div className="bg-white rounded-2xl p-8 w-full max-w-md shadow-2xl">
-        <div className="w-12 h-12 rounded-full border-2 flex items-center justify-center mb-4" style={{ borderColor: C.orange, background: C.navy }}><ChevronRight size={22} color={C.orange} /></div>
+        <img src="/logo.svg" alt="PWR Gestão" className="h-12 mb-4" />
         <div className="font-extrabold text-2xl tracking-tight mb-1" style={{ color: C.navy }}>Definir nova senha</div>
         <p className="text-[13px] mb-5" style={{ color: C.gray }}>Digite a nova senha de acesso ao sistema.</p>
         <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>NOVA SENHA</div>
-        <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
+        <PwInput value={pw} onChange={setPw} placeholder="••••••••" />
         <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>CONFIRMAR SENHA</div>
-        <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} onKeyDown={(e) => e.key === "Enter" && salvar()} placeholder="••••••••" className="border rounded-md px-3 py-2.5 text-sm w-full mb-4" style={{ borderColor: C.border }} />
+        <PwInput value={pw2} onChange={setPw2} onEnter={salvar} placeholder="••••••••" />
         {err && <div className="text-sm mb-3 rounded-md px-3 py-2" style={{ background: "#fee2e2", color: C.red }}>{err}</div>}
         <button onClick={salvar} disabled={busy} className="w-full rounded-md py-2.5 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{busy ? "Salvando…" : "Salvar e entrar"}</button>
       </div>
@@ -1365,6 +1408,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [recovery, setRecovery] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [changePwOpen, setChangePwOpen] = useState(false);
 
   const [acoesState, setAcoesState] = useState(GOSTO_ACOES);
   const [respState, setRespState] = useState(RESPONSAVEIS);
@@ -1549,8 +1593,8 @@ export default function App() {
       case "dashboard": return <Dashboard data={dashData} />;
       case "gantt": return <Gantt project={project} />;
       case "acoes": return <BaseAcoes project={project} actions={acoesState} responsaveis={respState} onCreate={handleCreateAcao} />;
-      case "kanban": return <Kanban />;
-      case "followup": return <FollowUp project={project} onSave={handleSaveFollowup} />;
+      case "kanban": return <Kanban project={project} actions={acoesState} />;
+      case "followup": return <FollowUp project={project} actions={acoesState} onSave={handleSaveFollowup} />;
       case "ata": return <EmissaoAta project={project} filled={ataFilled} onFill={handleFillAta} />;
       case "responsaveis": return <Responsaveis project={project} responsaveis={respState} actions={acoesState} onCreate={handleCreateResponsavel} />;
       case "documentos": return <Documentos project={project} documentos={docState} onCreate={handleCreateDocumento} />;
@@ -1564,10 +1608,11 @@ export default function App() {
     <div className="flex h-screen text-[15px]" style={{ background: C.page, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
       <Sidebar role={role} page={page} setPage={setPage} acoesCount={acoesState.length} collapsed={sidebarCollapsed} />
       <div className="flex-1 flex flex-col min-w-0">
-        <TopBar role={role} setRole={changeRole} page={page} project={project} openProjectPicker={() => setPicker(true)} onLogout={handleLogout} dbStatus={dbStatus} canSwitchRole={canSwitchRole} onToggleSidebar={() => setSidebarCollapsed((v) => !v)} />
+        <TopBar role={role} setRole={changeRole} page={page} project={project} openProjectPicker={() => setPicker(true)} onLogout={handleLogout} dbStatus={dbStatus} canSwitchRole={canSwitchRole} onToggleSidebar={() => setSidebarCollapsed((v) => !v)} onChangePw={() => setChangePwOpen(true)} />
         <main className="flex-1 overflow-y-auto p-6">{render()}</main>
       </div>
       {picker && <ProjectPicker projetos={projetos} onPick={(p) => { setProject(p); setPicker(false); }} onClose={() => setPicker(false)} />}
+      {changePwOpen && <ChangePasswordModal onClose={() => setChangePwOpen(false)} />}
     </div>
   );
 }
