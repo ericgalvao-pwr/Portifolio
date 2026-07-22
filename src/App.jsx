@@ -1609,7 +1609,7 @@ export default function App() {
       <Sidebar role={role} page={page} setPage={setPage} acoesCount={acoesState.length} collapsed={sidebarCollapsed} />
       <div className="flex-1 flex flex-col min-w-0">
         <TopBar role={role} setRole={changeRole} page={page} project={project} openProjectPicker={() => setPicker(true)} onLogout={handleLogout} dbStatus={dbStatus} canSwitchRole={canSwitchRole} onToggleSidebar={() => setSidebarCollapsed((v) => !v)} onChangePw={() => setChangePwOpen(true)} />
-        <main className="flex-1 overflow-y-auto p-6">{render()}</main>
+        <main className="flex-1 overflo   w-y-auto p-6">{render()}</main>
       </div>
       {picker && <ProjectPicker projetos={projetos} onPick={(p) => { setProject(p); setPicker(false); }} onClose={() => setPicker(false)} />}
       {changePwOpen && <ChangePasswordModal onClose={() => setChangePwOpen(false)} />}
