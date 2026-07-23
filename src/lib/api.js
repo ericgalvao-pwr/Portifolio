@@ -186,19 +186,28 @@ export async function listUsuarios() {
   return data
 }
 export async function createUserAsAdmin({ email, password, papel, nome, projetoId }) {
-  const aux = makeAuxClient()
-  if (!aux) throw new Error('Banco não conectado.')
-  const { data, error } = await aux.auth.signUp({ email, password })
+  const { data, error } = await supabase.functions.invoke('admin-usuarios', {
+    body: { action: 'criar', email, password, papel, nome, projetoId },
+  })
   if (error) throw error
-  const uid = data.user?.id
-  if (!uid) throw new Error('Não foi possível criar o usuário (e-mail já existe?).')
-  const { error: e2 } = await supabase.from('perfis').upsert({ id: uid, email, nome: nome || email, papel })
-  if (e2) throw e2
-  if (papel === 'cliente' && projetoId) {
-    const { error: e3 } = await supabase.from('projeto_acessos').upsert({ projeto_id: projetoId, user_id: uid, papel: 'cliente' })
-    if (e3) throw e3
-  }
-  return uid
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+export async function deleteUsuario(email) {
+  const { data, error } = await supabase.functions.invoke('admin-usuarios', {
+    body: { action: 'excluir', email },
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+export async function updateProjeto(id, payload) {
+  const { error } = await supabase.from('projetos').update(payload).eq('id', id)
+  if (error) throw error
+}
+export async function deleteProjeto(id) {
+  const { error } = await supabase.from('projetos').delete().eq('id', id)
+  if (error) throw error
 }
 
 // ---- ADMIN: REDEFINIR SENHA DE OUTRO USUÁRIO (via Edge Function) ----

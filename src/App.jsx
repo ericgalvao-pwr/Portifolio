@@ -1254,7 +1254,7 @@ function Solicitacoes({ solicitacoes, projetos, onCreate, onUpdate }) {
   );
 }
 
-function Administracao({ projetos, onCreateUser, onResetSenha }) {
+function Administracao({ projetos, onCreateUser, onResetSenha, onDeleteUser, onUpdateProjeto, onDeleteProjeto }) {
   const [modal, setModal] = useState(false);
   const [usuarios, setUsuarios] = useState([]);
   const [novo, setNovo] = useState({ nome: "", email: "", senha: "", papel: "cliente", projetoId: projetos[0]?.id || "" });
@@ -1264,7 +1264,33 @@ function Administracao({ projetos, onCreateUser, onResetSenha }) {
   const [resetPw, setResetPw] = useState("");
   const [resetMsg, setResetMsg] = useState(null);
   const [resetting, setResetting] = useState(false);
+  const [editProj, setEditProj] = useState(null);
+  const [pf, setPf] = useState({ nome: "", cliente: "", regiao: "Nordeste", uf: "CE", status: "Ativo" });
+  const [savingProj, setSavingProj] = useState(false);
+  const [projMsg, setProjMsg] = useState(null);
   const papelLabel = { admin: "Admin", consultor: "Consultor", cliente: "Cliente" };
+
+  const abrirEdicaoProj = (p) => { setEditProj(p); setPf({ nome: p.name, cliente: p.client, regiao: p.region, uf: p.uf, status: p.status }); setProjMsg(null); };
+  const salvarProj = async () => {
+    setSavingProj(true); setProjMsg(null);
+    try {
+      await onUpdateProjeto(editProj.id, { nome: pf.nome, cliente: pf.cliente, regiao: pf.regiao, uf: pf.uf, status: pf.status });
+      setEditProj(null);
+    } catch (e) { setProjMsg({ tipo: "erro", texto: e.message || "Falha ao salvar." }); }
+    finally { setSavingProj(false); }
+  };
+  const excluirProj = async () => {
+    if (!window.confirm(`Excluir o projeto "${editProj.name}"? Isso apaga também as ações, responsáveis e documentos dele. Não pode ser desfeito.`)) return;
+    setSavingProj(true); setProjMsg(null);
+    try { await onDeleteProjeto(editProj.id); setEditProj(null); }
+    catch (e) { setProjMsg({ tipo: "erro", texto: e.message || "Falha ao excluir." }); }
+    finally { setSavingProj(false); }
+  };
+  const excluirUsuario = async (email) => {
+    if (!window.confirm(`Excluir o acesso de ${email}? Não pode ser desfeito.`)) return;
+    try { await onDeleteUser(email); carregarUsuarios(); }
+    catch (e) { alert(e.message || "Falha ao excluir usuário."); }
+  };
 
   const fazerReset = async () => {
     if (resetPw.length < 6) { setResetMsg({ tipo: "erro", texto: "Mínimo de 6 caracteres." }); return; }
@@ -1314,7 +1340,7 @@ function Administracao({ projetos, onCreateUser, onResetSenha }) {
                 <td className="px-4 py-3"><span className="text-xs font-bold px-2 py-0.5 rounded" style={{ background: p.status === "Ativo" ? "#dcfce7" : "#f1f5f9", color: p.status === "Ativo" ? C.green : C.gray }}>{p.status}</span></td>
                 <td className="px-4 py-3" style={{ color: C.navyMed }}>{p.acoes}</td>
                 <td className="px-4 py-3" style={{ color: C.navyMed }}>{p.pct}%</td>
-                <td className="px-4 py-3"><button className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Editar</button></td>
+                <td className="px-4 py-3"><button onClick={() => abrirEdicaoProj(p)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Editar</button></td>
               </tr>
             ))}
           </tbody>
@@ -1350,11 +1376,39 @@ function Administracao({ projetos, onCreateUser, onResetSenha }) {
               <span className="text-sm font-semibold" style={{ color: C.navy }}>{u.nome || u.email}</span>
               <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: "#eef1f6", color: C.blue }}>{papelLabel[u.papel] || u.papel}</span>
               <span className="text-[11px]" style={{ color: C.gray }}>{u.email}</span>
-              <button onClick={() => { setResetAlvo(u.email); setResetPw(""); setResetMsg(null); }} className="ml-auto border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Redefinir senha</button>
+              <div className="ml-auto flex gap-2 shrink-0">
+                <button onClick={() => { setResetAlvo(u.email); setResetPw(""); setResetMsg(null); }} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Redefinir senha</button>
+                <button onClick={() => excluirUsuario(u.email)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.red }}>Excluir</button>
+              </div>
             </div>
           ))}
         </div>
       </div>
+      {editProj && (
+        <Modal title={`Editar projeto — ${editProj.name}`} onClose={() => setEditProj(null)}>
+          <div className="grid grid-cols-2 gap-3">
+            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>NOME</div><input value={pf.nome} onChange={(e) => setPf({ ...pf, nome: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full" style={{ borderColor: C.border }} /></div>
+            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>CLIENTE</div><input value={pf.cliente} onChange={(e) => setPf({ ...pf, cliente: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full" style={{ borderColor: C.border }} /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>REGIÃO</div>
+              <select value={pf.regiao} onChange={(e) => setPf({ ...pf, regiao: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}>
+                {["Norte", "Nordeste", "Centro-Oeste", "Sudeste", "Sul"].map((r) => <option key={r}>{r}</option>)}
+              </select></div>
+            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>UF</div><input value={pf.uf} onChange={(e) => setPf({ ...pf, uf: e.target.value.toUpperCase().slice(0, 2) })} className="border rounded-md px-3 py-2 text-sm w-full" style={{ borderColor: C.border }} /></div>
+          </div>
+          <div className="mt-3"><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>STATUS</div>
+            <select value={pf.status} onChange={(e) => setPf({ ...pf, status: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}>
+              <option>Ativo</option><option>Não iniciado</option>
+            </select></div>
+          {projMsg && <div className="text-sm mt-3 rounded-md px-3 py-2" style={{ background: "#fee2e2", color: C.red }}>{projMsg.texto}</div>}
+          <div className="flex gap-2 mt-4 items-center">
+            <button onClick={salvarProj} disabled={savingProj} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{savingProj ? "Salvando…" : "Salvar"}</button>
+            <button onClick={() => setEditProj(null)} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
+            <button onClick={excluirProj} disabled={savingProj} className="ml-auto border rounded-md px-4 py-2 text-sm font-semibold" style={{ borderColor: C.border, color: C.red }}>Excluir projeto</button>
+          </div>
+        </Modal>
+      )}
       {resetAlvo && (
         <Modal title="Redefinir senha" onClose={() => setResetAlvo(null)}>
           <p className="text-[13px] mb-3" style={{ color: C.gray }}>Definindo nova senha para <b>{resetAlvo}</b>.</p>
@@ -1831,6 +1885,10 @@ export default function App() {
   };
 
   const handleCreateUser = async (payload) => { await api.createUserAsAdmin(payload); };
+  const handleDeleteUser = async (email) => { await api.deleteUsuario(email); };
+  const refreshProjetos = async () => { if (hasSupabase) { const ps = await api.listProjetos(); if (ps.length) { setProjetos(ps); setScopeIds((cur) => cur.filter((id) => ps.some((p) => p.id === id)).length ? cur : [ps[0].id]); } } };
+  const handleUpdateProjeto = async (id, payload) => { await api.updateProjeto(id, payload); await refreshProjetos(); };
+  const handleDeleteProjeto = async (id) => { await api.deleteProjeto(id); await refreshProjetos(); };
   const handleMoveAcao = async (action, novoStatus) => {
     if (!action || action.st === novoStatus) return;
     const payload = { status: novoStatus };
@@ -1893,7 +1951,7 @@ export default function App() {
       case "responsaveis": return <>{nota}<Responsaveis project={project} projetos={projetos} responsaveis={respState} actions={acoesState.filter((a) => !a.projId || a.projId === project?.id)} onCreate={handleCreateResponsavel} /></>;
       case "documentos": return <>{nota}<Documentos project={project} documentos={docState} onCreate={handleCreateDocumento} /></>;
       case "solicitacoes": return <Solicitacoes solicitacoes={solic} projetos={projetos} onCreate={handleCreateSolicitacao} onUpdate={handleUpdateSolicitacao} />;
-      case "administracao": return <Administracao projetos={projetos} onCreateUser={handleCreateUser} onResetSenha={handleResetSenha} />;
+      case "administracao": return <Administracao projetos={projetos} onCreateUser={handleCreateUser} onResetSenha={handleResetSenha} onDeleteUser={handleDeleteUser} onUpdateProjeto={handleUpdateProjeto} onDeleteProjeto={handleDeleteProjeto} />;
       default: return null;
     }
   };
