@@ -54,6 +54,11 @@ export async function createAcao(projetoId, payload) {
   if (error) throw error
 }
 
+export async function updateAcao(codigo, payload) {
+  const { error } = await supabase.from('acoes').update(payload).eq('codigo', codigo)
+  if (error) throw error
+}
+
 // ---- RESPONSÁVEIS ----
 export async function listResponsaveis(projetoId) {
   const { data, error } = await supabase
@@ -88,8 +93,9 @@ export async function listSolicitacoes() {
     .from('solicitacoes').select('*, projetos(nome)').order('data', { ascending: false })
   if (error) throw error
   return data.map((s) => ({
-    data: fmt(s.data), quem: s.solicitante_email, tipo: s.tipo,
-    proj: s.projetos?.nome || '—', desc: s.descricao, st: s.status,
+    id: s.id, data: fmt(s.data), quem: s.solicitante_email, tipo: s.tipo,
+    projetoId: s.projeto_id, proj: s.projetos?.nome || '—', desc: s.descricao,
+    st: s.status, fechamento: fmt(s.data_fechamento), obs: s.observacao || '',
   }))
 }
 
@@ -98,9 +104,24 @@ export async function createSolicitacao(payload) {
   if (error) throw error
 }
 
+export async function updateSolicitacao(id, payload) {
+  const { error } = await supabase.from('solicitacoes').update(payload).eq('id', id)
+  if (error) throw error
+}
+
 // ---- FOLLOW-UP ----
 export async function saveFollowup(projetoId, payload) {
-  const { error } = await supabase.from('followups').insert({ projeto_id: projetoId, ...payload })
+  const { data, error } = await supabase.from('followups').insert({ projeto_id: projetoId, ...payload }).select().single()
+  if (error) throw error
+  return data
+}
+export async function listFollowups(projetoId) {
+  const { data, error } = await supabase.from('followups').select('*').eq('projeto_id', projetoId).order('created_at', { ascending: false })
+  if (error) throw error
+  return data
+}
+export async function updateFollowup(id, payload) {
+  const { error } = await supabase.from('followups').update(payload).eq('id', id)
   if (error) throw error
 }
 

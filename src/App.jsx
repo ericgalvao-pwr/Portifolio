@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, BarChart, ScatterChart, Scatter, ReferenceLine, Cell, LabelList,
@@ -82,11 +82,11 @@ function genActions(p) {
 
 function buildDashboard(actions) {
   const k = { total: actions.length, Finalizada: 0, "Em Andamento": 0, Atrasada: 0, Aberta: 0 };
-  actions.forEach((a) => { k[a.st]++; });
+  actions.forEach((a) => { k[effStatus(a)]++; });
   const pct = k.total ? Math.round((k.Finalizada / k.total) * 100) : 0;
 
   const atrasoBy = {};
-  actions.filter((a) => a.st === "Atrasada").forEach((a) => { atrasoBy[a.resp] = (atrasoBy[a.resp] || 0) + 1; });
+  actions.filter((a) => effStatus(a) === "Atrasada").forEach((a) => { atrasoBy[a.resp] = (atrasoBy[a.resp] || 0) + 1; });
   const paretoRaw = Object.entries(atrasoBy).sort((a, b) => b[1] - a[1]).map(([resp, n]) => ({ resp: (resp || "—").split(" ")[0], n }));
   const tot = paretoRaw.reduce((s, x) => s + x.n, 0) || 1;
   let acc = 0;
@@ -94,14 +94,14 @@ function buildDashboard(actions) {
 
   const byPhase = PHASES.map((fase) => {
     const o = { fase, Finalizada: 0, "Em Andamento": 0, Atrasada: 0, Aberta: 0 };
-    actions.filter((a) => a.fase === fase).forEach((a) => o[a.st]++);
+    actions.filter((a) => a.fase === fase).forEach((a) => o[effStatus(a)]++);
     return o;
   });
 
   const names = [...new Set(actions.map((a) => a.resp).filter(Boolean))];
   const byResp = names.map((resp) => {
     const o = { resp: resp.split(" ")[0], Finalizada: 0, "Em Andamento": 0, Atrasada: 0, Aberta: 0 };
-    actions.filter((a) => a.resp === resp).forEach((a) => o[a.st]++);
+    actions.filter((a) => a.resp === resp).forEach((a) => o[effStatus(a)]++);
     return o;
   });
 
@@ -196,7 +196,7 @@ const NAV = [
   { id: "ata", label: "Emissão de ATA", icon: PenLine, level: "project" },
   { id: "responsaveis", label: "Responsáveis", icon: Users, level: "project" },
   { id: "documentos", label: "Documentos", icon: FileIcon, level: "project" },
-  { id: "solicitacoes", label: "Solicitações", icon: MessageSquare, level: "portfolio", badge3: true },
+  { id: "solicitacoes", label: "Solicitações", icon: MessageSquare, level: "portfolio", badge: "solic" },
   { id: "administracao", label: "Administração", icon: Settings, level: "portfolio" },
 ];
 const ROLE_PAGES = {
@@ -259,7 +259,7 @@ function AlertPanel({ color, title, items, empty }) {
 }
 
 /* ============================ SIDEBAR ============================ */
-function Sidebar({ role, page, setPage, acoesCount, collapsed }) {
+function Sidebar({ role, page, setPage, acoesCount, solicCount, collapsed }) {
   const pages = ROLE_PAGES[role];
   const items = NAV.filter((n) => pages.includes(n.id));
   return (
@@ -282,7 +282,7 @@ function Sidebar({ role, page, setPage, acoesCount, collapsed }) {
               <Ico size={18} className="shrink-0" />
               {!collapsed && <span className="flex-1 text-left">{n.label}</span>}
               {!collapsed && n.badge === "acoes" && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: active ? "#ffffff33" : "#ffffff1a", color: "#fff" }}>{acoesCount}</span>}
-              {!collapsed && n.badge3 && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: active ? "#ffffff33" : "#ffffff1a", color: "#fff" }}>3</span>}
+              {!collapsed && n.badge === "solic" && solicCount > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: active ? "#ffffff33" : "#ffffff1a", color: "#fff" }}>{solicCount}</span>}
             </button>
           );
         })}
@@ -307,10 +307,51 @@ function DbBadge({ status }) {
   );
 }
 
-function TopBar({ role, setRole, page, project, openProjectPicker, onLogout, dbStatus, canSwitchRole, onToggleSidebar, onChangePw }) {
+function ScopePicker({ projetos, scopeIds, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ativos = projetos.filter((p) => p.status === "Ativo");
+  const allIds = ativos.map((p) => p.id);
+  const allSelected = allIds.length > 0 && allIds.every((id) => scopeIds.includes(id));
+  const toggle = (id) => {
+    const set = new Set(scopeIds);
+    set.has(id) ? set.delete(id) : set.add(id);
+    const next = allIds.filter((x) => set.has(x));
+    if (next.length) onChange(next);
+  };
+  const toggleAll = () => onChange(allSelected ? [allIds[0]] : allIds);
+  const single = scopeIds.length === 1 ? projetos.find((p) => p.id === scopeIds[0]) : null;
+  const label = allSelected ? "Todos os projetos" : single ? single.name : `${scopeIds.length} projetos`;
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-2 border rounded-md px-3 py-1.5 text-sm font-bold" style={{ borderColor: C.border, color: C.navy }}>
+        {single && <ProjIcon p={single} size={20} />} {label} <ChevronDown size={14} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-1 w-64 bg-white rounded-lg border shadow-xl z-50 py-2 max-h-80 overflow-y-auto" style={{ borderColor: C.border }}>
+            <label className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50 font-bold" style={{ color: C.navy }}>
+              <input type="checkbox" checked={allSelected} onChange={toggleAll} /> Todos os projetos
+            </label>
+            <div className="border-t my-1" style={{ borderColor: C.border }} />
+            {ativos.map((p) => (
+              <label key={p.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50" style={{ color: C.navy }}>
+                <input type="checkbox" checked={scopeIds.includes(p.id)} onChange={() => toggle(p.id)} />
+                <ProjIcon p={p} size={18} /> <span className="text-sm">{p.name}</span>
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function TopBar({ role, setRole, page, projetos, scopeIds, onScopeChange, onLogout, dbStatus, canSwitchRole, onToggleSidebar, onChangePw }) {
   const isProjectLevel = NAV.find((n) => n.id === page)?.level === "project";
   const title = NAV.find((n) => n.id === page)?.label || "";
-  const crumbProj = isProjectLevel && project ? project.name : "PWR Gestão";
+  const single = scopeIds.length === 1 ? projetos.find((p) => p.id === scopeIds[0]) : null;
+  const crumbProj = !isProjectLevel ? "PWR Gestão" : (single ? single.name : `${scopeIds.length} projetos`);
   return (
     <header className="h-16 bg-white border-b flex items-center px-5 gap-4 shrink-0" style={{ borderColor: C.border }}>
       <button onClick={onToggleSidebar} className="shrink-0 w-8 h-8 rounded-md flex items-center justify-center hover:bg-slate-100 transition-colors" title="Recolher/expandir menu">
@@ -322,10 +363,8 @@ function TopBar({ role, setRole, page, project, openProjectPicker, onLogout, dbS
       </div>
       <div className="ml-auto flex items-center gap-3">
         <DbBadge status={dbStatus} />
-        {isProjectLevel && project && role !== "cliente" && (
-          <button onClick={openProjectPicker} className="flex items-center gap-2 border rounded-md px-3 py-1.5 text-sm font-bold" style={{ borderColor: C.border, color: C.navy }}>
-            <ProjIcon p={project} size={20} /> {project.name} <ChevronDown size={14} />
-          </button>
+        {isProjectLevel && role !== "cliente" && (
+          <ScopePicker projetos={projetos} scopeIds={scopeIds} onChange={onScopeChange} />
         )}
         {canSwitchRole ? (
           <div className="flex items-center gap-1.5">
@@ -633,23 +672,51 @@ function Gantt({ project }) {
   );
 }
 
-function BaseAcoes({ project, actions, responsaveis, onCreate }) {
+function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onImport, multi }) {
   const [f, setF] = useState({ fase: "Todas", resp: "Todas", st: "Todos", origem: "Todas" });
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ descricao: "", fase: "Diagnóstico", origem: "Ata", resp: "", ab: "", fp: "", st: "Aberta" });
+  const [editing, setEditing] = useState(null);
+  const vazio = { descricao: "", fase: "Diagnóstico", origem: "Ata", resp: "", ab: "", fp: "", fr: "", st: "Aberta" };
+  const [form, setForm] = useState(vazio);
   const [saving, setSaving] = useState(false);
+  const fileRef = useRef();
   const resps = [...new Set(actions.map((a) => a.resp).filter(Boolean))];
   const origens = [...new Set(actions.map((a) => a.origem).filter(Boolean))];
   const filtered = actions.filter((a) =>
     (f.fase === "Todas" || a.fase === f.fase) && (f.resp === "Todas" || a.resp === f.resp) &&
-    (f.st === "Todos" || a.st === f.st) && (f.origem === "Todas" || a.origem === f.origem));
+    (f.st === "Todos" || effStatus(a) === f.st) && (f.origem === "Todas" || a.origem === f.origem));
+
+  const abrirNova = () => { setEditing(null); setForm(vazio); setModal(true); };
+  const abrirEdicao = (a) => {
+    setEditing(a);
+    setForm({ descricao: a.acao, fase: a.fase || "Diagnóstico", origem: a.origem || "Ata", resp: a.resp || "", ab: asISO(a.ab) || "", fp: asISO(a.fp) || "", fr: asISO(a.fr) || "", st: a.st || "Aberta" });
+    setModal(true);
+  };
+
+  const exportar = () => {
+    const headers = ["ACAO", "FASE", "ORIGEM", "RESPONSAVEL", "ABERTURA", "FECHO_PLANEJADO", "STATUS"];
+    const linhas = filtered.map((a) => [a.acao, a.fase, a.origem, a.resp, a.ab, a.fp, a.st]);
+    const csv = [headers, ...linhas].map((r) => r.map(csvCell).join(";")).join("\n");
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url; link.download = `acoes-${project.id}.csv`; link.click();
+    URL.revokeObjectURL(url);
+  };
+  const importar = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { const rows = parseAcoesCSV(String(reader.result)); if (rows.length) onImport(rows); else alert("Nenhuma linha reconhecida no arquivo."); };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
 
   const salvar = async () => {
     if (!form.descricao.trim()) return;
     setSaving(true);
-    await onCreate(form);
-    setSaving(false); setModal(false);
-    setForm({ descricao: "", fase: "Diagnóstico", origem: "Ata", resp: "", ab: "", fp: "", st: "Aberta" });
+    if (editing) await onUpdate(editing.id, form); else await onCreate(form);
+    setSaving(false); setModal(false); setEditing(null); setForm(vazio);
   };
   const Sel = ({ k, label, opts }) => (
     <div>
@@ -662,12 +729,15 @@ function BaseAcoes({ project, actions, responsaveis, onCreate }) {
   const inp = "border rounded-md px-3 py-2 text-sm w-full";
   return (
     <div>
-      <PageHeader title={`Base de Ações — ${project.name}`} subtitle={`${filtered.length} de ${actions.length} ações`}
+      <PageHeader title={`Base de Ações — ${multi ? "vários projetos" : project.name}`} subtitle={`${filtered.length} de ${actions.length} ações`}
         right={
           <div className="flex gap-2">
-            <button className="border rounded-md px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5" style={{ borderColor: C.border, color: C.navy }}><Download size={14} /> Exportar CSV</button>
-            <button className="border rounded-md px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5" style={{ borderColor: C.border, color: C.navy }}><Upload size={14} /> Importar GSB</button>
-            <button onClick={() => setModal(true)} className="rounded-md px-3 py-1.5 text-sm font-bold text-white flex items-center gap-1.5" style={{ background: C.orange }}><Plus size={14} /> Nova ação</button>
+            <button onClick={exportar} className="border rounded-md px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5" style={{ borderColor: C.border, color: C.navy }}><Download size={14} /> Exportar CSV</button>
+            {!multi && <>
+              <button onClick={() => fileRef.current?.click()} className="border rounded-md px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5" style={{ borderColor: C.border, color: C.navy }}><Upload size={14} /> Importar GSB</button>
+              <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={importar} className="hidden" />
+              <button onClick={abrirNova} className="rounded-md px-3 py-1.5 text-sm font-bold text-white flex items-center gap-1.5" style={{ background: C.orange }}><Plus size={14} /> Nova ação</button>
+            </>}
           </div>
         } />
       <div className="flex gap-3 items-end mb-4 flex-wrap">
@@ -681,12 +751,13 @@ function BaseAcoes({ project, actions, responsaveis, onCreate }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-[11px] font-semibold text-left" style={{ color: C.gray }}>
-              {["ID", "AÇÃO", "FASE", "ORIGEM", "RESPONSÁVEL", "ABERTURA", "FECH. PLAN.", "FECH. REAL", "STATUS"].map((h) => <th key={h} className="px-4 py-3">{h}</th>)}
+              {[...(multi ? ["PROJETO"] : []), "ID", "AÇÃO", "FASE", "ORIGEM", "RESPONSÁVEL", "ABERTURA", "FECH. PLAN.", "FECH. REAL", "STATUS", ...(!multi ? [""] : [])].map((h, i) => <th key={h || `x${i}`} className="px-4 py-3">{h}</th>)}
             </tr>
           </thead>
           <tbody>
             {filtered.map((a, i) => (
               <tr key={a.id || i} className="border-t" style={{ borderColor: C.border }}>
+                {multi && <td className="px-4 py-3 font-semibold" style={{ color: C.navyMed }}>{a.projName || "—"}</td>}
                 <td className="px-4 py-3 font-semibold" style={{ color: C.blue }}>{a.id || "—"}</td>
                 <td className="px-4 py-3 font-semibold" style={{ color: C.navy }}>{a.acao || "—"}</td>
                 <td className="px-4 py-3" style={{ color: C.gray }}>{a.fase}</td>
@@ -695,14 +766,15 @@ function BaseAcoes({ project, actions, responsaveis, onCreate }) {
                 <td className="px-4 py-3" style={{ color: C.gray }}>{a.ab}</td>
                 <td className="px-4 py-3" style={{ color: C.gray }}>{a.fp}</td>
                 <td className="px-4 py-3" style={{ color: C.gray }}>{a.fr}</td>
-                <td className="px-4 py-3"><StatusBadge st={a.st} /></td>
+                <td className="px-4 py-3"><StatusBadge st={effStatus(a)} /></td>
+                {!multi && <td className="px-4 py-3"><button onClick={() => abrirEdicao(a)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Editar</button></td>}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       {modal && (
-        <Modal title={`Nova ação — ${project.name}`} onClose={() => setModal(false)}>
+        <Modal title={editing ? `Editar ${editing.id}` : `Nova ação — ${project.name}`} onClose={() => { setModal(false); setEditing(null); }}>
           <div className="mb-3"><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>AÇÃO</div>
             <input value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Descreva a ação" className={inp} style={{ borderColor: C.border }} /></div>
           <div className="grid grid-cols-2 gap-3">
@@ -716,14 +788,15 @@ function BaseAcoes({ project, actions, responsaveis, onCreate }) {
               <option value="">Selecione</option>{responsaveis.map((r) => <option key={r.email || r.nome}>{r.nome}</option>)}
             </select></div>
           <div className="grid grid-cols-3 gap-3 mt-3">
-            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>ABERTURA</div><input value={form.ab} onChange={(e) => setForm({ ...form, ab: e.target.value })} placeholder="dd/mm/aaaa" className={inp} style={{ borderColor: C.border }} /></div>
-            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>FECH. PLAN.</div><input value={form.fp} onChange={(e) => setForm({ ...form, fp: e.target.value })} placeholder="dd/mm/aaaa" className={inp} style={{ borderColor: C.border }} /></div>
-            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>STATUS</div>
-              <select value={form.st} onChange={(e) => setForm({ ...form, st: e.target.value })} className={`${inp} bg-white`} style={{ borderColor: C.border }}>{Object.keys(STATUS).map((o) => <option key={o}>{o}</option>)}</select></div>
+            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>ABERTURA</div><input type="date" value={form.ab} onChange={(e) => setForm({ ...form, ab: e.target.value })} className={inp} style={{ borderColor: C.border }} /></div>
+            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>FECH. PLAN.</div><input type="date" value={form.fp} onChange={(e) => setForm({ ...form, fp: e.target.value })} className={inp} style={{ borderColor: C.border }} /></div>
+            <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>FECH. REAL</div><input type="date" value={form.fr} onChange={(e) => setForm({ ...form, fr: e.target.value })} className={inp} style={{ borderColor: C.border }} /></div>
           </div>
+          <div className="mt-3"><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>STATUS</div>
+            <select value={form.st} onChange={(e) => setForm({ ...form, st: e.target.value })} className={`${inp} bg-white`} style={{ borderColor: C.border }}>{Object.keys(STATUS).map((o) => <option key={o}>{o}</option>)}</select></div>
           <div className="flex gap-2 mt-4">
-            <button onClick={salvar} disabled={saving} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{saving ? "Salvando…" : "Salvar ação"}</button>
-            <button onClick={() => setModal(false)} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
+            <button onClick={salvar} disabled={saving} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{saving ? "Salvando…" : (editing ? "Salvar alterações" : "Salvar ação")}</button>
+            <button onClick={() => { setModal(false); setEditing(null); }} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
           </div>
         </Modal>
       )}
@@ -731,16 +804,19 @@ function BaseAcoes({ project, actions, responsaveis, onCreate }) {
   );
 }
 
-function Kanban({ project, actions }) {
+function Kanban({ project, actions, multi, onMove }) {
   const cols = ["Aberta", "Em Andamento", "Atrasada", "Finalizada"];
   const [resp, setResp] = useState("Todos");
+  const [dragged, setDragged] = useState(null);
+  const [overCol, setOverCol] = useState(null);
   const resps = [...new Set(actions.map((a) => a.resp).filter(Boolean))];
   const list = actions.filter((a) => resp === "Todos" || a.resp === resp);
   const grouped = { Aberta: [], "Em Andamento": [], Atrasada: [], Finalizada: [] };
-  list.forEach((a) => { (grouped[a.st] || grouped.Aberta).push(a); });
+  list.forEach((a) => { const s = effStatus(a); (grouped[s] || grouped.Aberta).push(a); });
+  const soltar = (col) => { if (dragged && onMove) onMove(dragged, col); setDragged(null); setOverCol(null); };
   return (
     <div>
-      <PageHeader title={`Kanban — ${project.name}`} subtitle="Ações do projeto organizadas por status" />
+      <PageHeader title={`Kanban — ${multi ? "vários projetos" : project.name}`} subtitle="Arraste os cards entre as colunas para mudar o status" />
       <div className="flex gap-3 items-end mb-4 flex-wrap">
         <div>
           <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>RESPONSÁVEL</div>
@@ -755,17 +831,20 @@ function Kanban({ project, actions }) {
         {cols.map((col) => {
           const s = STATUS[col];
           return (
-            <div key={col} className="bg-white rounded-lg border p-3" style={{ borderColor: C.border }}>
+            <div key={col} onDragOver={(e) => { e.preventDefault(); setOverCol(col); }} onDragLeave={() => setOverCol((c) => c === col ? null : c)} onDrop={() => soltar(col)}
+              className="bg-white rounded-lg border p-3 transition-shadow" style={{ borderColor: overCol === col ? s.c : C.border, boxShadow: overCol === col ? `0 0 0 2px ${s.c}33` : "none" }}>
               <div className="flex items-center gap-2 mb-3 px-1">
                 <span className="w-2.5 h-2.5 rounded-full" style={{ background: s.c }} />
                 <span className="font-bold text-sm" style={{ color: C.navy }}>{col}</span>
                 <span className="ml-auto text-xs px-2 py-0.5 rounded-full" style={{ background: "#eef1f6", color: C.navyMed }}>{grouped[col].length}</span>
               </div>
-              <div className="space-y-2.5">
+              <div className="space-y-2.5 min-h-[40px]">
                 {grouped[col].length === 0 && <div className="text-xs px-1 py-2" style={{ color: C.gray }}>—</div>}
                 {grouped[col].map((a, i) => (
-                  <div key={a.id || i} className="border rounded-md p-3 border-l-2" style={{ borderColor: C.border, borderLeftColor: s.c }}>
+                  <div key={a.id || i} draggable onDragStart={() => setDragged(a)} onDragEnd={() => { setDragged(null); setOverCol(null); }}
+                    className="border rounded-md p-3 border-l-2 cursor-grab active:cursor-grabbing bg-white" style={{ borderColor: C.border, borderLeftColor: s.c }}>
                     <div className="font-semibold text-[13px] mb-2" style={{ color: C.navy }}>{a.acao || "—"}</div>
+                    {multi && a.projName && <div className="text-[10px] font-bold mb-1.5" style={{ color: C.orange }}>{a.projName}</div>}
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] mb-1.5">
                       {a.id && <span className="font-semibold" style={{ color: C.blue }}>{a.id}</span>}
                       {a.resp && <span style={{ color: C.gray }}>{a.resp}</span>}
@@ -782,25 +861,50 @@ function Kanban({ project, actions }) {
   );
 }
 
-function FollowUp({ project, actions = [], onSave }) {
+function FollowUp({ project, actions = [] }) {
   const recent = actions.filter((a) => a.st === "Finalizada").map((a) => [a.acao, a.id]);
   const [notes, setNotes] = useState({ av: "", imp: "", prox: "" });
   const [draft, setDraft] = useState("");
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [lista, setLista] = useState([]);
+  const [editId, setEditId] = useState(null);
+
+  const carregar = () => {
+    if (!hasSupabase || typeof api.listFollowups !== "function") return;
+    api.listFollowups(project.id).then(setLista).catch((e) => console.error("followups:", e.message));
+  };
+  useEffect(() => { setLista([]); carregar(); /* eslint-disable-next-line */ }, [project.id]);
+
   const gerar = () => setDraft(
     "Avanço:" + (notes.av ? " " + notes.av : " (descreva o que avançou nesta semana).") +
     "\n\nImpedimentos e pontos de atenção:" + (notes.imp ? " " + notes.imp : " (bloqueios, riscos e dependências).") +
     "\n\nPróximos passos:" + (notes.prox ? " " + notes.prox : " (o que será feito a seguir)."));
+  const novo = () => { setEditId(null); setNotes({ av: "", imp: "", prox: "" }); setDraft(""); };
+  const abrir = (fu) => {
+    setEditId(fu.id);
+    setNotes({ av: fu.avanco || "", imp: fu.impedimentos || "", prox: fu.proximos_passos || "" });
+    setDraft(fu.texto_final || "");
+  };
   const salvar = async () => {
     setSaving(true);
-    await onSave({ avanco: notes.av, impedimentos: notes.imp, proximos_passos: notes.prox, texto_final: draft });
-    setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 3000);
+    const payload = { avanco: notes.av, impedimentos: notes.imp, proximos_passos: notes.prox, texto_final: draft };
+    try {
+      if (hasSupabase) {
+        if (editId) await api.updateFollowup(editId, payload);
+        else { const row = await api.saveFollowup(project.id, payload); setEditId(row?.id || null); }
+        carregar();
+      }
+      setSaved(true); setTimeout(() => setSaved(false), 3000);
+    } catch (e) { console.error("salvar followup:", e.message); }
+    finally { setSaving(false); }
   };
   const fields = [["AVANÇO", "O que avançou nesta semana...", "av"], ["IMPEDIMENTOS E PONTOS DE ATENÇÃO", "Bloqueios, riscos, dependências...", "imp"], ["PRÓXIMOS PASSOS", "O que será feito a seguir...", "prox"]];
+  const fmtData = (iso) => { if (!iso) return ""; const d = new Date(iso); return d.toLocaleDateString("pt-BR") + " " + d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }); };
   return (
     <div>
-      <PageHeader title={`Follow-Up Semanal — ${project.name}`} subtitle="Registre o avanço da semana e gere um rascunho executivo com IA" />
+      <PageHeader title={`Follow-Up Semanal — ${project.name}`} subtitle="Registre o avanço da semana e gere um rascunho executivo com IA"
+        right={editId ? <button onClick={novo} className="border rounded-md px-3 py-1.5 text-sm font-bold flex items-center gap-1.5" style={{ borderColor: C.border, color: C.navy }}><Plus size={14} /> Novo follow-up</button> : null} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-white rounded-lg border p-5" style={{ borderColor: C.border }}>
           <div className="font-bold text-sm" style={{ color: C.navy }}>Ações concluídas recentes</div>
@@ -811,7 +915,7 @@ function FollowUp({ project, actions = [], onSave }) {
               <label key={id} className="flex items-center gap-1.5 text-[13px]" style={{ color: C.navyMed }}><input type="checkbox" /> {t}<span className="text-[10px]" style={{ color: C.gray }}>{id}</span></label>
             ))}
           </div>
-          <div className="font-bold text-sm mb-1" style={{ color: C.navy }}>Nota do consultor</div>
+          <div className="font-bold text-sm mb-1" style={{ color: C.navy }}>{editId ? "Editando follow-up" : "Nota do consultor"}</div>
           <div className="inline-block text-[11px] px-2 py-0.5 rounded mb-3" style={{ background: "#fff1e8", color: C.orange }}>Consultor / Admin</div>
           {fields.map(([label, ph, k]) => (
             <div key={k} className="mb-4">
@@ -828,10 +932,25 @@ function FollowUp({ project, actions = [], onSave }) {
           <div className="text-[11px] rounded-md px-3 py-2 mb-3" style={{ background: "#fff7f0", color: C.orange }}>Tom: direto, executivo, 1ª pessoa do plural, sem emojis · estrutura: Avanço / Impedimentos e pontos de atenção / Próximos passos</div>
           <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={10} placeholder="O texto gerado aparece aqui e pode ser editado antes de salvar." className="w-full border rounded-md px-3 py-2 text-sm resize-none" style={{ borderColor: C.border }} />
           <div className="flex gap-2 mt-3 items-center">
-            <button onClick={salvar} disabled={saving} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.navy }}>{saving ? "Salvando…" : "Salvar no banco"}</button>
+            <button onClick={salvar} disabled={saving} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.navy }}>{saving ? "Salvando…" : editId ? "Salvar alterações" : "Salvar no banco"}</button>
             <button className="border rounded-md px-4 py-2 text-sm font-semibold" style={{ borderColor: C.border, color: C.navy }}>Gerar relatório PDF (ISO 9001:2015)</button>
             {saved && <span className="text-sm font-semibold" style={{ color: C.green }}>✓ Salvo</span>}
           </div>
+        </div>
+      </div>
+      <div className="bg-white rounded-lg border p-5 mt-4" style={{ borderColor: C.border }}>
+        <div className="font-bold text-sm mb-3" style={{ color: C.navy }}>Follow-ups salvos</div>
+        {lista.length === 0 && <span className="text-[13px]" style={{ color: C.gray }}>Nenhum follow-up salvo ainda.</span>}
+        <div className="space-y-2">
+          {lista.map((fu) => (
+            <div key={fu.id} className="flex items-start gap-3 border rounded-md px-3 py-2" style={{ borderColor: editId === fu.id ? C.orange : C.border }}>
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] font-semibold" style={{ color: C.gray }}>{fmtData(fu.created_at)}</div>
+                <div className="text-[13px] truncate" style={{ color: C.navy }}>{(fu.texto_final || fu.avanco || "—").slice(0, 120)}</div>
+              </div>
+              <button onClick={() => abrir(fu)} className="border rounded px-2.5 py-1 text-xs font-semibold shrink-0" style={{ borderColor: C.border, color: C.navy }}>Abrir / editar</button>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -935,17 +1054,18 @@ function EmissaoAta({ project, onFill, filled }) {
   );
 }
 
-function Responsaveis({ project, responsaveis, actions, onCreate }) {
+function Responsaveis({ project, projetos, responsaveis, actions, onCreate }) {
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ nome: "", empresa: project.client || "", papel: "", email: "" });
+  const [form, setForm] = useState({ nome: "", empresa: project.client || "PWR Gestão", papel: "", email: "" });
   const [saving, setSaving] = useState(false);
+  const empresas = ["PWR Gestão", ...[...new Set((projetos || []).map((p) => p.client).filter(Boolean))]];
   const countByNome = useMemo(() => {
     const m = {}; actions.forEach((a) => { if (a.resp) m[a.resp] = (m[a.resp] || 0) + 1; }); return m;
   }, [actions]);
   const salvar = async () => {
     if (!form.nome.trim()) return;
     setSaving(true); await onCreate(form); setSaving(false); setModal(false);
-    setForm({ nome: "", empresa: "Gosto Mineiro Laticínios", papel: "", email: "" });
+    setForm({ nome: "", empresa: project.client || "PWR Gestão", papel: "", email: "" });
   };
   return (
     <div>
@@ -974,7 +1094,12 @@ function Responsaveis({ project, responsaveis, actions, onCreate }) {
       {modal && (
         <Modal title="Novo responsável" onClose={() => setModal(false)}>
           <LabeledInput label="NOME" ph="Nome completo" value={form.nome} onChange={(v) => setForm({ ...form, nome: v })} />
-          <LabeledInput label="EMPRESA" value={form.empresa} onChange={(v) => setForm({ ...form, empresa: v })} />
+          <div className="mb-3">
+            <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>EMPRESA</div>
+            <select value={form.empresa} onChange={(e) => setForm({ ...form, empresa: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}>
+              {empresas.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
           <LabeledInput label="PAPEL / FUNÇÃO" ph="Ex: Consultor, Gerente..." value={form.papel} onChange={(v) => setForm({ ...form, papel: v })} />
           <LabeledInput label="E-MAIL" ph="pessoa@empresa.com" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
           <div className="flex gap-2 mt-4">
@@ -1029,29 +1154,43 @@ function Documentos({ project, documentos, onCreate }) {
   );
 }
 
-function Solicitacoes({ solicitacoes, onCreate }) {
-  const [form, setForm] = useState({ tipo: "Dúvida", descricao: "" });
+function Solicitacoes({ solicitacoes, projetos, onCreate, onUpdate }) {
+  const [form, setForm] = useState({ tipo: "Dúvida", descricao: "", projetoId: "" });
   const [saving, setSaving] = useState(false);
+  const [edit, setEdit] = useState(null); // solicitação em edição
+  const [ef, setEf] = useState({ status: "Aberta", data_fechamento: "", observacao: "" });
+  const [savingEdit, setSavingEdit] = useState(false);
   const tipoColor = { "Correção de dados": C.blue, "Dúvida": C.navyMed, "Novo projeto": C.orange };
+  const stInfo = { Aberta: C.red, "Em análise": C.amber, Fechada: C.green };
   const salvar = async () => {
     if (!form.descricao.trim()) return;
-    setSaving(true); await onCreate(form); setSaving(false); setForm({ tipo: "Dúvida", descricao: "" });
+    setSaving(true); await onCreate(form); setSaving(false); setForm({ tipo: "Dúvida", descricao: "", projetoId: "" });
   };
+  const abrirEdicao = (s) => { setEdit(s); setEf({ status: s.st || "Aberta", data_fechamento: asISO(s.fechamento) || "", observacao: s.obs || "" }); };
+  const salvarEdicao = async () => {
+    setSavingEdit(true);
+    await onUpdate(edit.id, { status: ef.status, data_fechamento: ef.data_fechamento || null, observacao: ef.observacao });
+    setSavingEdit(false); setEdit(null);
+  };
+  const ativos = (projetos || []).filter((p) => p.status === "Ativo");
   return (
     <div>
       <PageHeader title="Solicitações" subtitle="Dúvidas, pedidos de novo projeto ou correção de dados — lista central da PWR" />
       <div className="bg-white rounded-lg border overflow-x-auto mb-4" style={{ borderColor: C.border }}>
         <table className="w-full text-sm">
-          <thead><tr className="text-[11px] font-semibold text-left" style={{ color: C.gray }}>{["DATA", "SOLICITANTE", "TIPO", "PROJETO", "DESCRIÇÃO", "STATUS"].map((h) => <th key={h} className="px-4 py-3">{h}</th>)}</tr></thead>
+          <thead><tr className="text-[11px] font-semibold text-left" style={{ color: C.gray }}>{["", "DATA", "SOLICITANTE", "TIPO", "PROJETO", "DESCRIÇÃO", "STATUS", "FECHAMENTO", ""].map((h, i) => <th key={h || `x${i}`} className="px-4 py-3">{h}</th>)}</tr></thead>
           <tbody>
             {solicitacoes.map((s, i) => (
-              <tr key={i} className="border-t" style={{ borderColor: C.border }}>
+              <tr key={s.id || i} className="border-t" style={{ borderColor: C.border }}>
+                <td className="px-4 py-3"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: stInfo[s.st] || C.gray }} /></td>
                 <td className="px-4 py-3" style={{ color: C.gray }}>{s.data}</td>
                 <td className="px-4 py-3" style={{ color: C.blue }}>{s.quem}</td>
                 <td className="px-4 py-3"><span className="border rounded-full px-2.5 py-0.5 text-[11px] font-medium" style={{ borderColor: C.border, color: tipoColor[s.tipo] || C.navyMed }}>{s.tipo}</span></td>
                 <td className="px-4 py-3" style={{ color: C.navyMed }}>{s.proj}</td>
                 <td className="px-4 py-3" style={{ color: C.navyMed }}>{s.desc}</td>
-                <td className="px-4 py-3"><span className="text-xs font-bold" style={{ color: s.st === "Aberta" ? C.red : C.amber }}>{s.st}</span></td>
+                <td className="px-4 py-3"><span className="text-xs font-bold" style={{ color: stInfo[s.st] || C.gray }}>{s.st}</span></td>
+                <td className="px-4 py-3" style={{ color: C.gray }}>{s.fechamento && s.fechamento !== "–" ? s.fechamento : "—"}</td>
+                <td className="px-4 py-3">{s.id && <button onClick={() => abrirEdicao(s)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Editar</button>}</td>
               </tr>
             ))}
           </tbody>
@@ -1060,12 +1199,36 @@ function Solicitacoes({ solicitacoes, onCreate }) {
       <div className="bg-white rounded-lg border p-5" style={{ borderColor: C.border }}>
         <div className="font-bold text-sm" style={{ color: C.navy }}>Nova solicitação</div>
         <div className="text-[11px] mb-3" style={{ color: C.gray }}>Qualquer usuário pode registrar</div>
-        <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>TIPO</div>
-        <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full bg-white mb-3" style={{ borderColor: C.border, color: C.navy }}><option>Dúvida</option><option>Correção de dados</option><option>Novo projeto</option></select>
-        <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>DESCRIÇÃO</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>TIPO</div>
+            <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}><option>Dúvida</option><option>Correção de dados</option><option>Novo projeto</option></select></div>
+          <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>PROJETO</div>
+            <select value={form.projetoId} onChange={(e) => setForm({ ...form, projetoId: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}>
+              <option value="">Sem projeto específico</option>
+              {ativos.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select></div>
+        </div>
+        <div className="text-[10px] font-semibold mb-1 mt-3" style={{ color: C.gray }}>DESCRIÇÃO</div>
         <textarea value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} rows={3} placeholder="Descreva sua solicitação..." className="w-full border rounded-md px-3 py-2 text-sm resize-none mb-3" style={{ borderColor: C.border }} />
         <button onClick={salvar} disabled={saving} className="w-full rounded-md py-2.5 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{saving ? "Registrando…" : "Registrar solicitação"}</button>
       </div>
+      {edit && (
+        <Modal title="Editar solicitação" onClose={() => setEdit(null)}>
+          <div className="text-[13px] mb-3" style={{ color: C.navyMed }}>{edit.desc}</div>
+          <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>STATUS</div>
+          <select value={ef.status} onChange={(e) => setEf({ ...ef, status: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full bg-white mb-3" style={{ borderColor: C.border, color: C.navy }}>
+            <option>Aberta</option><option>Em análise</option><option>Fechada</option>
+          </select>
+          <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>DATA DE FECHAMENTO</div>
+          <input type="date" value={ef.data_fechamento} onChange={(e) => setEf({ ...ef, data_fechamento: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full mb-3" style={{ borderColor: C.border }} />
+          <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>OBSERVAÇÃO (o que foi feito)</div>
+          <textarea value={ef.observacao} onChange={(e) => setEf({ ...ef, observacao: e.target.value })} rows={3} placeholder="Descreva o que foi feito para resolver..." className="w-full border rounded-md px-3 py-2 text-sm resize-none mb-4" style={{ borderColor: C.border }} />
+          <div className="flex gap-2">
+            <button onClick={salvarEdicao} disabled={savingEdit} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{savingEdit ? "Salvando…" : "Salvar"}</button>
+            <button onClick={() => setEdit(null)} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -1391,6 +1554,43 @@ function ResetPassword({ onDone }) {
 /* ============================ HELPERS APP ============================ */
 const numFrom = (id) => { const n = parseInt(String(id).split("-")[1], 10); return isNaN(n) ? 0 : n; };
 const toISO = (s) => { if (!s || s === "–") return null; const [d, m, y] = s.split("/"); if (!d || !m || !y) return null; const yyyy = y.length === 2 ? "20" + y : y; return `${yyyy}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`; };
+const asISO = (v) => { if (!v) return null; if (v.includes("/")) return toISO(v); if (v.includes("-")) return v; return null; };
+const effStatus = (a) => {
+  if (a.st === "Finalizada") return "Finalizada";
+  const iso = asISO(a.fp);
+  if (iso) { const hoje = new Date(); hoje.setHours(0, 0, 0, 0); if (new Date(iso + "T00:00:00") < hoje) return "Atrasada"; }
+  return a.st;
+};
+const csvCell = (v) => { const s = String(v ?? ""); return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+function parseAcoesCSV(text) {
+  const lines = text.replace(/\r/g, "").split("\n").filter((l) => l.trim());
+  if (!lines.length) return [];
+  const delim = (lines[0].match(/;/g) || []).length >= (lines[0].match(/,/g) || []).length ? ";" : ",";
+  const parseLine = (line) => {
+    const out = []; let cur = "", q = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; }
+      else if (c === delim && !q) { out.push(cur); cur = ""; }
+      else cur += c;
+    }
+    out.push(cur); return out.map((s) => s.trim());
+  };
+  const norm = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  const header = parseLine(lines[0]).map(norm);
+  const idx = (names) => { for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; } return -1; };
+  const iAcao = idx(["acao", "descricao", "acao/descricao"]), iFase = idx(["fase"]), iOrigem = idx(["origem"]),
+    iResp = idx(["responsavel", "resp"]), iAb = idx(["abertura", "data abertura", "data_abertura"]),
+    iFp = idx(["fech. plan.", "fecho planejado", "fecho_planejado", "prazo", "fech plan"]), iSt = idx(["status"]);
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const c = parseLine(lines[i]);
+    const descricao = iAcao >= 0 ? c[iAcao] : c[0];
+    if (!descricao) continue;
+    rows.push({ descricao, fase: iFase >= 0 ? c[iFase] : "", origem: iOrigem >= 0 ? c[iOrigem] : "", resp: iResp >= 0 ? c[iResp] : "", ab: iAb >= 0 ? c[iAb] : "", fp: iFp >= 0 ? c[iFp] : "", st: iSt >= 0 ? c[iSt] : "" });
+  }
+  return rows;
+}
 
 /* ============================ APP ============================ */
 export default function App() {
@@ -1399,6 +1599,7 @@ export default function App() {
   const [page, setPage] = useState("portfolio");
   const [projetos, setProjetos] = useState(PROJECTS);
   const [project, setProject] = useState(PROJ("gosto"));
+  const [scopeIds, setScopeIds] = useState(["gosto"]);
   const [picker, setPicker] = useState(false);
   const [ataFilled, setAtaFilled] = useState(false);
   const [dbStatus, setDbStatus] = useState(hasSupabase ? "checking" : "demo");
@@ -1464,41 +1665,50 @@ export default function App() {
   useEffect(() => {
     if (!logged || !hasSupabase) return;
     (async () => {
-      try { const ps = await api.listProjetos(); if (ps.length) { setProjetos(ps); setProject((cur) => ps.find((p) => p.id === cur.id) || ps[0]); } } catch (e) { console.error("projetos:", e.message); }
+      try { const ps = await api.listProjetos(); if (ps.length) { setProjetos(ps); setProject((cur) => ps.find((p) => p.id === cur.id) || ps[0]); setScopeIds((cur) => cur.filter((id) => ps.some((p) => p.id === id)).length ? cur : [(ps.find((p) => scopeIds.includes(p.id)) || ps[0]).id]); } } catch (e) { console.error("projetos:", e.message); }
       try { const ss = await api.listSolicitacoes(); setSolic(ss); } catch (e) { console.error("solicitacoes:", e.message); }
     })();
   }, [logged]);
 
   const projById = (id) => projetos.find((p) => p.id === id) || PROJ(id);
 
-  // carrega dados do projeto atual
-  const loadProject = async (id) => {
-    const proj = projById(id);
-    let acts = null, resp = null, docs = null;
-    if (hasSupabase) {
-      try { acts = await api.listAcoes(id); } catch (e) { console.error("acoes:", e.message); }
-      try { resp = await api.listResponsaveis(id); } catch (e) { console.error("resp:", e.message); }
-      try { docs = await api.listDocumentos(id); } catch (e) { console.error("docs:", e.message); }
+  // carrega dados do escopo (1, vários ou todos os projetos)
+  const loadScope = async (ids) => {
+    if (!ids || ids.length === 0) return;
+    let merged = [];
+    for (const id of ids) {
+      let acts = null;
+      if (hasSupabase) { try { acts = await api.listAcoes(id); } catch (e) { console.error("acoes:", e.message); } }
+      if (!acts) acts = [];
+      const proj = projById(id);
+      merged = merged.concat(acts.map((a) => ({ ...a, projId: id, projName: proj?.name })));
     }
-    if (!acts || acts.length === 0) acts = id === "gosto" ? GOSTO_ACOES : (proj.status === "Não iniciado" ? [] : genActions(proj));
-    if (!resp || resp.length === 0) resp = RESPONSAVEIS;
-    if (!docs || docs.length === 0) docs = DOCS;
-    setAcoesState(acts); setRespState(resp); setDocState(docs);
+    setAcoesState(merged);
+    // responsáveis e documentos usam o projeto primário (telas de projeto único)
+    const primary = ids[0];
+    let resp = null, docs = null;
+    if (hasSupabase) {
+      try { resp = await api.listResponsaveis(primary); } catch (e) { console.error("resp:", e.message); }
+      try { docs = await api.listDocumentos(primary); } catch (e) { console.error("docs:", e.message); }
+    }
+    setRespState(resp || []); setDocState(docs || []);
   };
 
-  useEffect(() => { if (logged) loadProject(project.id); /* eslint-disable-next-line */ }, [logged, project.id]);
+  useEffect(() => { if (logged) loadScope(scopeIds); /* eslint-disable-next-line */ }, [logged, scopeIds.join(",")]);
+
+  const setScope = (ids) => { setScopeIds(ids); setProject(projById(ids[0])); };
 
   const login = (r) => {
     setLogged(true); setRole(r); setPage(r === "admin" ? "portfolio" : "dashboard");
-    if (r !== "admin") setProject(PROJ(r === "cliente" ? "gosto" : "metalica"));
+    if (r !== "admin") { const pid = r === "cliente" ? "gosto" : "metalica"; setProject(PROJ(pid)); setScopeIds([pid]); }
     setAtaFilled(false);
   };
   const changeRole = (r) => {
     setRole(r);
     if (!ROLE_PAGES[r].includes(page)) setPage(r === "admin" ? "portfolio" : "dashboard");
-    if (r === "consultor" && project.id === "gosto") setProject(PROJ("metalica"));
+    if (r === "consultor" && project.id === "gosto") { setProject(PROJ("metalica")); setScopeIds(["metalica"]); }
   };
-  const openProject = (p) => { setProject(p); setPage("dashboard"); setAtaFilled(false); };
+  const openProject = (p) => { setProject(p); setScopeIds([p.id]); setPage("dashboard"); setAtaFilled(false); };
 
   // ---- handlers de escrita ----
   const nextCodigo = (offset = 0) => {
@@ -1513,13 +1723,27 @@ export default function App() {
         const responsavel_id = respState.find((r) => r.nome === form.resp)?.id || null;
         await api.createAcao(project.id, {
           codigo, descricao: form.descricao, fase: form.fase, origem: form.origem,
-          responsavel_id, data_abertura: toISO(form.ab), fecho_planejado: toISO(form.fp), status: form.st,
+          responsavel_id, data_abertura: asISO(form.ab), fecho_planejado: asISO(form.fp), fecho_real: asISO(form.fr), status: form.st,
         });
-        await loadProject(project.id);
+        await loadScope(scopeIds);
         return;
       } catch (e) { console.error("createAcao:", e.message); }
     }
-    setAcoesState((prev) => [...prev, { id: codigo, acao: form.descricao, fase: form.fase, origem: form.origem, resp: form.resp, ab: form.ab || "–", fp: form.fp || "–", fr: "–", st: form.st }]);
+    setAcoesState((prev) => [...prev, { id: codigo, acao: form.descricao, fase: form.fase, origem: form.origem, resp: form.resp, ab: form.ab || "–", fp: form.fp || "–", fr: form.fr || "–", st: form.st }]);
+  };
+  const handleUpdateAcao = async (codigo, form) => {
+    if (hasSupabase) {
+      try {
+        const responsavel_id = respState.find((r) => r.nome === form.resp)?.id || null;
+        await api.updateAcao(codigo, {
+          descricao: form.descricao, fase: form.fase, origem: form.origem, responsavel_id,
+          data_abertura: asISO(form.ab), fecho_planejado: asISO(form.fp), fecho_real: asISO(form.fr), status: form.st,
+        });
+        await loadScope(scopeIds);
+        return;
+      } catch (e) { console.error("updateAcao:", e.message); }
+    }
+    setAcoesState((prev) => prev.map((a) => a.id === codigo ? { ...a, acao: form.descricao, fase: form.fase, origem: form.origem, resp: form.resp, ab: form.ab || "–", fp: form.fp || "–", fr: form.fr || "–", st: form.st } : a));
   };
   const handleCreateResponsavel = async (form) => {
     const is_pwr = form.empresa === "PWR Gestão";
@@ -1531,7 +1755,7 @@ export default function App() {
   };
   const handleCreateDocumento = async (form) => {
     if (hasSupabase) {
-      try { await api.createDocumento(project.id, { nome: form.nome, tipo: form.tipo, link_drive: form.link, data: new Date().toISOString().slice(0, 10) }); await loadProject(project.id); return; }
+      try { await api.createDocumento(project.id, { nome: form.nome, tipo: form.tipo, link_drive: form.link, data: new Date().toISOString().slice(0, 10) }); await loadScope(scopeIds); return; }
       catch (e) { console.error("createDocumento:", e.message); }
     }
     const hoje = new Date(); const dd = String(hoje.getDate()).padStart(2, "0"), mm = String(hoje.getMonth() + 1).padStart(2, "0"), yy = String(hoje.getFullYear()).slice(2);
@@ -1539,11 +1763,18 @@ export default function App() {
   };
   const handleCreateSolicitacao = async (form) => {
     if (hasSupabase) {
-      try { await api.createSolicitacao({ tipo: form.tipo, descricao: form.descricao, solicitante_email: "demo@pwrgestao.com" }); const ss = await api.listSolicitacoes(); setSolic(ss); return; }
+      try { await api.createSolicitacao({ tipo: form.tipo, descricao: form.descricao, projeto_id: form.projetoId || null, solicitante_email: perfil?.email || "demo@pwrgestao.com" }); const ss = await api.listSolicitacoes(); setSolic(ss); return; }
       catch (e) { console.error("createSolicitacao:", e.message); }
     }
     const hoje = new Date(); const dd = String(hoje.getDate()).padStart(2, "0"), mm = String(hoje.getMonth() + 1).padStart(2, "0"), yy = String(hoje.getFullYear()).slice(2);
     setSolic((prev) => [{ data: `${dd}/${mm}/${yy}`, quem: "demo@pwrgestao.com", tipo: form.tipo, proj: "—", desc: form.descricao, st: "Aberta" }, ...prev]);
+  };
+  const handleUpdateSolicitacao = async (id, payload) => {
+    if (hasSupabase) {
+      try { await api.updateSolicitacao(id, payload); const ss = await api.listSolicitacoes(); setSolic(ss); return; }
+      catch (e) { console.error("updateSolicitacao:", e.message); }
+    }
+    setSolic((prev) => prev.map((s) => s.id === id ? { ...s, st: payload.status ?? s.st, fechamento: payload.data_fechamento || s.fechamento, obs: payload.observacao ?? s.obs } : s));
   };
   const handleSaveFollowup = async (form) => {
     if (hasSupabase) { try { await api.saveFollowup(project.id, form); return; } catch (e) { console.error("saveFollowup:", e.message); } }
@@ -1563,7 +1794,7 @@ export default function App() {
           pauta: ATA_EXAMPLE.pauta.map((texto) => ({ texto, status: "Discutido" })),
           decisoes: ATA_EXAMPLE.decisoes.map((texto) => ({ texto, responsavel: "" })),
         }, enc);
-        await loadProject(project.id);
+        await loadScope(scopeIds);
       } catch (e) { console.error("saveAta:", e.message); }
     } else if (project.id === "gosto" && !acoesState.some((a) => a.id === "GOS-18")) {
       setAcoesState((prev) => [...prev, ...GOSTO_ATA_EXTRA]);
@@ -1572,6 +1803,35 @@ export default function App() {
   };
 
   const handleCreateUser = async (payload) => { await api.createUserAsAdmin(payload); };
+  const handleMoveAcao = async (action, novoStatus) => {
+    if (!action || action.st === novoStatus) return;
+    const payload = { status: novoStatus };
+    if (novoStatus === "Finalizada" && (!action.fr || action.fr === "–")) payload.fecho_real = new Date().toISOString().slice(0, 10);
+    if (hasSupabase) {
+      try { await api.updateAcao(action.id, payload); await loadScope(scopeIds); return; }
+      catch (e) { console.error("move:", e.message); }
+    }
+    setAcoesState((prev) => prev.map((a) => a.id === action.id ? { ...a, st: novoStatus, ...(payload.fecho_real ? { fr: payload.fecho_real } : {}) } : a));
+  };
+  const handleImportAcoes = async (rows) => {
+    const prefix = project.id.slice(0, 3).toUpperCase();
+    let max = acoesState.reduce((m, a) => Math.max(m, numFrom(a.id)), 0);
+    if (hasSupabase) {
+      for (const r of rows) {
+        max += 1;
+        const responsavel_id = respState.find((x) => x.nome === r.resp)?.id || null;
+        try {
+          await api.createAcao(project.id, {
+            codigo: `${prefix}-${max}`, descricao: r.descricao, fase: r.fase || "Diagnóstico",
+            origem: r.origem || "Ata", responsavel_id, data_abertura: asISO(r.ab), fecho_planejado: asISO(r.fp), status: r.st || "Aberta",
+          });
+        } catch (e) { console.error("import:", e.message); }
+      }
+      await loadScope(scopeIds);
+    } else {
+      setAcoesState((prev) => [...prev, ...rows.map((r, i) => ({ id: `${prefix}-${max + 1 + i}`, acao: r.descricao, fase: r.fase, origem: r.origem, resp: r.resp, ab: r.ab || "–", fp: r.fp || "–", fr: "–", st: r.st || "Aberta" }))]);
+    }
+  };
   const handleResetSenha = async ({ email, novaSenha }) => { await api.resetSenhaUsuario(email, novaSenha); };
 
   const dashData = useMemo(() => buildDashboard(acoesState), [acoesState]);
@@ -1587,31 +1847,36 @@ export default function App() {
   const canSwitchRole = !hasSupabase || perfil?.papel === "admin";
 
   const render = () => {
+    const multi = scopeIds.length > 1;
+    const nota = multi ? (
+      <div className="mb-4 text-[13px] rounded-md px-3 py-2" style={{ background: "#fff7f0", color: C.orange }}>
+        Esta tela é por projeto. Exibindo <b>{project?.name}</b>. Selecione um único projeto no seletor acima para trocar.
+      </div>
+    ) : null;
     switch (page) {
       case "portfolio": return <Portfolio projetos={projetos} openProject={openProject} />;
       case "mapa": return <MapaBrasil projetos={projetos} openProject={openProject} />;
       case "dashboard": return <Dashboard data={dashData} />;
-      case "gantt": return <Gantt project={project} />;
-      case "acoes": return <BaseAcoes project={project} actions={acoesState} responsaveis={respState} onCreate={handleCreateAcao} />;
-      case "kanban": return <Kanban project={project} actions={acoesState} />;
-      case "followup": return <FollowUp project={project} actions={acoesState} onSave={handleSaveFollowup} />;
-      case "ata": return <EmissaoAta project={project} filled={ataFilled} onFill={handleFillAta} />;
-      case "responsaveis": return <Responsaveis project={project} responsaveis={respState} actions={acoesState} onCreate={handleCreateResponsavel} />;
-      case "documentos": return <Documentos project={project} documentos={docState} onCreate={handleCreateDocumento} />;
-      case "solicitacoes": return <Solicitacoes solicitacoes={solic} onCreate={handleCreateSolicitacao} />;
+      case "gantt": return <>{nota}<Gantt project={project} /></>;
+      case "acoes": return <BaseAcoes project={project} actions={acoesState} responsaveis={respState} onCreate={handleCreateAcao} onUpdate={handleUpdateAcao} onImport={handleImportAcoes} multi={multi} />;
+      case "kanban": return <Kanban project={project} actions={acoesState} multi={multi} onMove={handleMoveAcao} />;
+      case "followup": return <>{nota}<FollowUp project={project} actions={acoesState.filter((a) => !a.projId || a.projId === project?.id)} onSave={handleSaveFollowup} /></>;
+      case "ata": return <>{nota}<EmissaoAta project={project} filled={ataFilled} onFill={handleFillAta} /></>;
+      case "responsaveis": return <>{nota}<Responsaveis project={project} projetos={projetos} responsaveis={respState} actions={acoesState.filter((a) => !a.projId || a.projId === project?.id)} onCreate={handleCreateResponsavel} /></>;
+      case "documentos": return <>{nota}<Documentos project={project} documentos={docState} onCreate={handleCreateDocumento} /></>;
+      case "solicitacoes": return <Solicitacoes solicitacoes={solic} projetos={projetos} onCreate={handleCreateSolicitacao} onUpdate={handleUpdateSolicitacao} />;
       case "administracao": return <Administracao projetos={projetos} onCreateUser={handleCreateUser} onResetSenha={handleResetSenha} />;
       default: return null;
     }
   };
 
   return (
-    <div className="flex h-screen text-[15px]" style={{ background: C.page, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
-      <Sidebar role={role} page={page} setPage={setPage} acoesCount={acoesState.length} collapsed={sidebarCollapsed} />
-      <div className="flex-1 flex flex-col min-w-0">
-        <TopBar role={role} setRole={changeRole} page={page} project={project} openProjectPicker={() => setPicker(true)} onLogout={handleLogout} dbStatus={dbStatus} canSwitchRole={canSwitchRole} onToggleSidebar={() => setSidebarCollapsed((v) => !v)} onChangePw={() => setChangePwOpen(true)} />
-        <main className="flex-1 overflo   w-y-auto p-6">{render()}</main>
+    <div className="flex h-screen overflow-hidden text-[15px]" style={{ background: C.page, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
+      <Sidebar role={role} page={page} setPage={setPage} acoesCount={acoesState.length} solicCount={solic.filter((s) => s.st === "Aberta").length} collapsed={sidebarCollapsed} />
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        <TopBar role={role} setRole={changeRole} page={page} projetos={projetos} scopeIds={scopeIds} onScopeChange={setScope} onLogout={handleLogout} dbStatus={dbStatus} canSwitchRole={canSwitchRole} onToggleSidebar={() => setSidebarCollapsed((v) => !v)} onChangePw={() => setChangePwOpen(true)} />
+        <main className="flex-1 overflow-y-auto p-6 min-h-0">{render()}</main>
       </div>
-      {picker && <ProjectPicker projetos={projetos} onPick={(p) => { setProject(p); setPicker(false); }} onClose={() => setPicker(false)} />}
       {changePwOpen && <ChangePasswordModal onClose={() => setChangePwOpen(false)} />}
     </div>
   );
