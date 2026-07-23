@@ -717,7 +717,7 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelet
     if (nome.endsWith(".xlsx") || nome.endsWith(".xls")) {
       reader.onload = () => {
         try {
-          const wb = XLSX.read(reader.result, { type: "array" });
+          const wb = XLSX.read(new Uint8Array(reader.result), { type: "array" });
           const sheet = wb.Sheets[wb.SheetNames[0]];
           processar(parseAcoesCSV(XLSX.utils.sheet_to_csv(sheet)));
         } catch (err) { console.error(err); alert("Não foi possível ler o arquivo Excel."); }
