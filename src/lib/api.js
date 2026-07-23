@@ -59,6 +59,11 @@ export async function updateAcao(codigo, payload) {
   if (error) throw error
 }
 
+export async function deleteAcao(codigo) {
+  const { error } = await supabase.from('acoes').delete().eq('codigo', codigo)
+  if (error) throw error
+}
+
 // ---- RESPONSÁVEIS ----
 export async function listResponsaveis(projetoId) {
   const { data, error } = await supabase

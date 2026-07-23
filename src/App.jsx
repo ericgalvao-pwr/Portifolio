@@ -21,10 +21,11 @@ const C = {
   green: "#16a34a", amber: "#f59e0b", red: "#dc2626", gray: "#94a3b8",
 };
 const STATUS = {
-  Finalizada: { c: C.green, label: "Finalizada" },
+  Backlog: { c: "#64748b", label: "Backlog" },
+  Aberta: { c: C.gray, label: "Aberta" },
   "Em Andamento": { c: C.amber, label: "Em Andamento" },
   Atrasada: { c: C.red, label: "Atrasada" },
-  Aberta: { c: C.gray, label: "Aberta" },
+  Finalizada: { c: C.green, label: "Finalizada" },
 };
 const PHASES = ["Diagnóstico", "Estruturação", "Implantação", "Estabilização", "Governança"];
 const ORIGINS = ["Ata", "Visita", "Auditoria", "Reunião", "Balanço"];
@@ -82,7 +83,7 @@ function genActions(p) {
 }
 
 function buildDashboard(actions) {
-  const k = { total: actions.length, Finalizada: 0, "Em Andamento": 0, Atrasada: 0, Aberta: 0 };
+  const k = { total: actions.length, Backlog: 0, Finalizada: 0, "Em Andamento": 0, Atrasada: 0, Aberta: 0 };
   actions.forEach((a) => { k[effStatus(a)]++; });
   const pct = k.total ? Math.round((k.Finalizada / k.total) * 100) : 0;
 
@@ -94,14 +95,14 @@ function buildDashboard(actions) {
   const pareto = paretoRaw.map((x) => { acc += x.n; return { ...x, cum: Math.round((acc / tot) * 100) }; });
 
   const byPhase = PHASES.map((fase) => {
-    const o = { fase, Finalizada: 0, "Em Andamento": 0, Atrasada: 0, Aberta: 0 };
+    const o = { fase, Backlog: 0, Finalizada: 0, "Em Andamento": 0, Atrasada: 0, Aberta: 0 };
     actions.filter((a) => a.fase === fase).forEach((a) => o[effStatus(a)]++);
     return o;
   });
 
   const names = [...new Set(actions.map((a) => a.resp).filter(Boolean))];
   const byResp = names.map((resp) => {
-    const o = { resp: resp.split(" ")[0], Finalizada: 0, "Em Andamento": 0, Atrasada: 0, Aberta: 0 };
+    const o = { resp: resp.split(" ")[0], Backlog: 0, Finalizada: 0, "Em Andamento": 0, Atrasada: 0, Aberta: 0 };
     actions.filter((a) => a.resp === resp).forEach((a) => o[effStatus(a)]++);
     return o;
   });
@@ -128,7 +129,7 @@ function buildDashboard(actions) {
       return { fase: f, x, y, color, label: `${f} ${y}%` };
     });
 
-  return { kpis: { total: k.total, fin: k.Finalizada, emAnd: k["Em Andamento"], atras: k.Atrasada, aberta: k.Aberta, pct }, pareto, byPhase, byResp, heat, alerts: { vencidas, aVencer } };
+  return { kpis: { total: k.total, fin: k.Finalizada, emAnd: k["Em Andamento"], atras: k.Atrasada, aberta: k.Aberta, backlog: k.Backlog, pct }, pareto, byPhase, byResp, heat, alerts: { vencidas, aVencer } };
 }
 
 const GANTT = [
@@ -526,7 +527,7 @@ function Dashboard({ data }) {
   const { kpis, pareto, byPhase, byResp, heat, alerts } = data;
   const legend = (
     <div className="flex gap-4 text-xs mt-2" style={{ color: C.gray }}>
-      {[["Finalizada", C.green], ["Em Andamento", C.amber], ["Atrasada", C.red], ["Aberta", C.gray]].map(([l, c]) => (
+      {[["Finalizada", C.green], ["Em Andamento", C.amber], ["Atrasada", C.red], ["Aberta", C.gray], ["Backlog", "#64748b"]].map(([l, c]) => (
         <span key={l} className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ background: c }} />{l}</span>
       ))}
     </div>
@@ -554,6 +555,7 @@ function Dashboard({ data }) {
         <StatCard value={kpis.emAnd} label="EM ANDAMENTO" accent={C.blue} />
         <StatCard value={kpis.atras} label="ATRASADAS" accent={C.red} />
         <StatCard value={kpis.aberta} label="ABERTAS" accent={C.gray} />
+        <StatCard value={kpis.backlog} label="BACKLOG" accent="#64748b" />
         <StatCard value={`${kpis.pct}%`} label="CONCLUÍDO" accent={C.orange} />
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -586,7 +588,8 @@ function Dashboard({ data }) {
               <Bar dataKey="Finalizada" stackId="a" fill={C.green} />
               <Bar dataKey="Em Andamento" stackId="a" fill={C.amber} />
               <Bar dataKey="Atrasada" stackId="a" fill={C.red} />
-              <Bar dataKey="Aberta" stackId="a" fill={C.gray} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="Aberta" stackId="a" fill={C.gray} />
+              <Bar dataKey="Backlog" stackId="a" fill="#64748b" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
           {legend}
@@ -622,7 +625,8 @@ function Dashboard({ data }) {
               <Bar dataKey="Finalizada" stackId="a" fill={C.green} />
               <Bar dataKey="Em Andamento" stackId="a" fill={C.amber} />
               <Bar dataKey="Atrasada" stackId="a" fill={C.red} />
-              <Bar dataKey="Aberta" stackId="a" fill={C.gray} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="Aberta" stackId="a" fill={C.gray} />
+              <Bar dataKey="Backlog" stackId="a" fill="#64748b" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
           {legend}
@@ -673,7 +677,7 @@ function Gantt({ project }) {
   );
 }
 
-function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onImport, multi }) {
+function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelete, onImport, multi }) {
   const [f, setF] = useState({ fase: "Todas", resp: "Todas", st: "Todos", origem: "Todas" });
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -781,7 +785,10 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onImpor
                 <td className="px-4 py-3" style={{ color: C.gray }}>{a.fp}</td>
                 <td className="px-4 py-3" style={{ color: C.gray }}>{a.fr}</td>
                 <td className="px-4 py-3"><StatusBadge st={effStatus(a)} /></td>
-                {!multi && <td className="px-4 py-3"><button onClick={() => abrirEdicao(a)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Editar</button></td>}
+                {!multi && <td className="px-4 py-3"><div className="flex gap-2">
+                  <button onClick={() => abrirEdicao(a)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Editar</button>
+                  <button onClick={() => { if (window.confirm(`Excluir a ação "${a.acao}"? Esta ação não pode ser desfeita.`)) onDelete(a.id); }} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.red }}>Excluir</button>
+                </div></td>}
               </tr>
             ))}
           </tbody>
@@ -819,13 +826,13 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onImpor
 }
 
 function Kanban({ project, actions, multi, onMove }) {
-  const cols = ["Aberta", "Em Andamento", "Atrasada", "Finalizada"];
+  const cols = ["Backlog", "Aberta", "Em Andamento", "Atrasada", "Finalizada"];
   const [resp, setResp] = useState("Todos");
   const [dragged, setDragged] = useState(null);
   const [overCol, setOverCol] = useState(null);
   const resps = [...new Set(actions.map((a) => a.resp).filter(Boolean))];
   const list = actions.filter((a) => resp === "Todos" || a.resp === resp);
-  const grouped = { Aberta: [], "Em Andamento": [], Atrasada: [], Finalizada: [] };
+  const grouped = { Backlog: [], Aberta: [], "Em Andamento": [], Atrasada: [], Finalizada: [] };
   list.forEach((a) => { const s = effStatus(a); (grouped[s] || grouped.Aberta).push(a); });
   const soltar = (col) => { if (dragged && onMove) onMove(dragged, col); setDragged(null); setOverCol(null); };
   return (
@@ -841,7 +848,7 @@ function Kanban({ project, actions, multi, onMove }) {
         <button onClick={() => setResp("Todos")} className="border rounded-md px-3 py-1.5 text-sm" style={{ borderColor: C.border, color: C.navyMed }}>Limpar</button>
         <div className="ml-auto text-sm" style={{ color: C.gray }}>{list.length} ações</div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         {cols.map((col) => {
           const s = STATUS[col];
           return (
@@ -1570,7 +1577,7 @@ const numFrom = (id) => { const n = parseInt(String(id).split("-")[1], 10); retu
 const toISO = (s) => { if (!s || s === "–") return null; const [d, m, y] = s.split("/"); if (!d || !m || !y) return null; const yyyy = y.length === 2 ? "20" + y : y; return `${yyyy}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`; };
 const asISO = (v) => { if (!v) return null; if (v.includes("/")) return toISO(v); if (v.includes("-")) return v; return null; };
 const effStatus = (a) => {
-  if (a.st === "Finalizada") return "Finalizada";
+  if (a.st === "Finalizada" || a.st === "Backlog") return a.st;
   const iso = asISO(a.fp);
   if (iso) { const hoje = new Date(); hoje.setHours(0, 0, 0, 0); if (new Date(iso + "T00:00:00") < hoje) return "Atrasada"; }
   return a.st;
@@ -1745,6 +1752,13 @@ export default function App() {
     }
     setAcoesState((prev) => [...prev, { id: codigo, acao: form.descricao, fase: form.fase, origem: form.origem, resp: form.resp, ab: form.ab || "–", fp: form.fp || "–", fr: form.fr || "–", st: form.st }]);
   };
+  const handleDeleteAcao = async (codigo) => {
+    if (hasSupabase) {
+      try { await api.deleteAcao(codigo); await loadScope(scopeIds); return; }
+      catch (e) { console.error("deleteAcao:", e.message); }
+    }
+    setAcoesState((prev) => prev.filter((a) => a.id !== codigo));
+  };
   const handleUpdateAcao = async (codigo, form) => {
     if (hasSupabase) {
       try {
@@ -1872,7 +1886,7 @@ export default function App() {
       case "mapa": return <MapaBrasil projetos={projetos} openProject={openProject} />;
       case "dashboard": return <Dashboard data={dashData} />;
       case "gantt": return <>{nota}<Gantt project={project} /></>;
-      case "acoes": return <BaseAcoes project={project} actions={acoesState} responsaveis={respState} onCreate={handleCreateAcao} onUpdate={handleUpdateAcao} onImport={handleImportAcoes} multi={multi} />;
+      case "acoes": return <BaseAcoes project={project} actions={acoesState} responsaveis={respState} onCreate={handleCreateAcao} onUpdate={handleUpdateAcao} onDelete={handleDeleteAcao} onImport={handleImportAcoes} multi={multi} />;
       case "kanban": return <Kanban project={project} actions={acoesState} multi={multi} onMove={handleMoveAcao} />;
       case "followup": return <>{nota}<FollowUp project={project} actions={acoesState.filter((a) => !a.projId || a.projId === project?.id)} onSave={handleSaveFollowup} /></>;
       case "ata": return <>{nota}<EmissaoAta project={project} filled={ataFilled} onFill={handleFillAta} /></>;
