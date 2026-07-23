@@ -12,6 +12,7 @@ import {
 import { hasSupabase, supabase } from "./lib/supabase";
 import * as api from "./lib/api";
 import brazil from "@svg-maps/brazil";
+import * as XLSX from "xlsx";
 
 /* ============================ TOKENS DE MARCA ============================ */
 const C = {
@@ -706,9 +707,22 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onImpor
   const importar = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const nome = file.name.toLowerCase();
     const reader = new FileReader();
-    reader.onload = () => { const rows = parseAcoesCSV(String(reader.result)); if (rows.length) onImport(rows); else alert("Nenhuma linha reconhecida no arquivo."); };
-    reader.readAsText(file);
+    const processar = (rows) => { if (rows.length) onImport(rows); else alert("Nenhuma linha reconhecida no arquivo."); };
+    if (nome.endsWith(".xlsx") || nome.endsWith(".xls")) {
+      reader.onload = () => {
+        try {
+          const wb = XLSX.read(reader.result, { type: "array" });
+          const sheet = wb.Sheets[wb.SheetNames[0]];
+          processar(parseAcoesCSV(XLSX.utils.sheet_to_csv(sheet)));
+        } catch (err) { console.error(err); alert("Não foi possível ler o arquivo Excel."); }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      reader.onload = () => processar(parseAcoesCSV(String(reader.result)));
+      reader.readAsText(file);
+    }
     e.target.value = "";
   };
 
@@ -735,7 +749,7 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onImpor
             <button onClick={exportar} className="border rounded-md px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5" style={{ borderColor: C.border, color: C.navy }}><Download size={14} /> Exportar CSV</button>
             {!multi && <>
               <button onClick={() => fileRef.current?.click()} className="border rounded-md px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5" style={{ borderColor: C.border, color: C.navy }}><Upload size={14} /> Importar GSB</button>
-              <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={importar} className="hidden" />
+              <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={importar} className="hidden" />
               <button onClick={abrirNova} className="rounded-md px-3 py-1.5 text-sm font-bold text-white flex items-center gap-1.5" style={{ background: C.orange }}><Plus size={14} /> Nova ação</button>
             </>}
           </div>
