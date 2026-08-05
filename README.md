@@ -47,6 +47,23 @@ Em **Project -> Settings -> Environment Variables**, adicione as mesmas duas (`V
 
 Kanban e "Novo projeto" da Administração seguem como demonstração visual (não persistem).
 
+## Controle de acesso por projeto
+
+Na Administração, ao criar uma conta com papel **Consultor**, marque os projetos que ele poderá ver. Para alterar depois, use o botão **Projetos** na linha do usuário em "Usuários com acesso". O vínculo fica na tabela `perfil_projetos`.
+
+### RLS (obrigatório em produção)
+
+O filtro por projeto na interface **não** é suficiente: a chave `anon` é pública (vai no JS do site), então sem RLS qualquer pessoa consegue ler e alterar as tabelas direto pela API, ignorando o app — inclusive se autoliberar projetos.
+
+Rode `supabase/rls_policies.sql` no SQL Editor para aplicar o controle no banco:
+
+- **admin** — acesso total
+- **consultor** — somente os projetos vinculados (lê e escreve)
+- **cliente** — somente os projetos vinculados (apenas leitura)
+- `perfis` e `perfil_projetos` só podem ser alterados por admin
+
+O script é idempotente. Depois de aplicar, valide entrando com um consultor: ele deve ver apenas os projetos marcados.
+
 ## Build
 
 ```bash

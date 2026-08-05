@@ -164,9 +164,12 @@ export async function signOut() {
 export async function getPerfil() {
   const { data: u } = await supabase.auth.getUser()
   if (!u?.user) return null
-  const { data, error } = await supabase.from('perfis').select('papel, nome, email').eq('id', u.user.id).single()
+  const { data, error } = await supabase
+    .from('perfis')
+    .select('id, papel, nome, email, perfil_projetos(projeto_id)')
+    .eq('id', u.user.id).single()
   if (error) throw error
-  return data
+  return { ...data, projetoIds: (data.perfil_projetos || []).map((x) => x.projeto_id) }
 }
 
 // ---- RECUPERAÇÃO DE SENHA ----
@@ -181,16 +184,45 @@ export async function updatePassword(novaSenha) {
 
 // ---- ADMIN: CRIAR CONTA + PERMISSÕES ----
 export async function listUsuarios() {
-  const { data, error } = await supabase.from('perfis').select('email, nome, papel').order('papel')
+  const { data, error } = await supabase
+    .from('perfis')
+    .select('id, email, nome, papel, perfil_projetos(projeto_id)')
+    .order('papel')
   if (error) throw error
-  return data
+  return data.map((u) => ({
+    id: u.id, email: u.email, nome: u.nome, papel: u.papel,
+    projetoIds: (u.perfil_projetos || []).map((x) => x.projeto_id),
+  }))
 }
-export async function createUserAsAdmin({ email, password, papel, nome, projetoId }) {
+
+// Substitui a lista de projetos de um perfil (usa o id do perfil, não o e-mail).
+export async function setProjetosDoPerfil(perfilId, projetoIds) {
+  const { error: eDel } = await supabase.from('perfil_projetos').delete().eq('perfil_id', perfilId)
+  if (eDel) throw eDel
+  if (!projetoIds?.length) return
+  const rows = projetoIds.map((projeto_id) => ({ perfil_id: perfilId, projeto_id }))
+  const { error } = await supabase.from('perfil_projetos').insert(rows)
+  if (error) throw error
+}
+
+// O perfil é criado pela Edge Function; buscamos o id dele para gravar os vínculos.
+export async function getPerfilIdPorEmail(email) {
+  const { data, error } = await supabase.from('perfis').select('id').eq('email', email).maybeSingle()
+  if (error) throw error
+  if (!data) throw new Error(`Conta criada, mas o perfil de ${email} não foi encontrado para vincular os projetos. Use o botão "Projetos" na lista de usuários.`)
+  return data.id
+}
+export async function createUserAsAdmin({ email, password, papel, nome, projetoId, projetoIds }) {
   const { data, error } = await supabase.functions.invoke('admin-usuarios', {
     body: { action: 'criar', email, password, papel, nome, projetoId },
   })
   if (error) throw error
   if (data?.error) throw new Error(data.error)
+  // A conta já existe neste ponto; o vínculo de projetos é gravado aqui pelo app.
+  if (projetoIds?.length) {
+    const perfilId = await getPerfilIdPorEmail(email)
+    await setProjetosDoPerfil(perfilId, projetoIds)
+  }
   return data
 }
 export async function deleteUsuario(email) {

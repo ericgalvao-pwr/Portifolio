@@ -1254,10 +1254,47 @@ function Solicitacoes({ solicitacoes, projetos, onCreate, onUpdate }) {
   );
 }
 
-function Administracao({ projetos, onCreateUser, onResetSenha, onDeleteUser, onUpdateProjeto, onDeleteProjeto }) {
+// Lista de projetos com checkbox — define quais projetos um consultor pode ver.
+function SeletorProjetos({ projetos, selecionados, onChange, label = "PROJETOS COM ACESSO" }) {
+  const toggle = (id) =>
+    onChange(selecionados.includes(id) ? selecionados.filter((x) => x !== id) : [...selecionados, id]);
+  const todos = projetos.map((p) => p.id);
+  return (
+    <div>
+      <div className="flex items-center gap-3 mb-1.5">
+        <div className="text-[10px] font-semibold" style={{ color: C.gray }}>{label}</div>
+        <button type="button" onClick={() => onChange(todos)} className="text-[10px] font-semibold" style={{ color: C.blue }}>Marcar todos</button>
+        <button type="button" onClick={() => onChange([])} className="text-[10px] font-semibold" style={{ color: C.gray }}>Limpar</button>
+        <span className="text-[10px] ml-auto" style={{ color: C.gray }}>{selecionados.length} de {projetos.length}</span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        {projetos.map((p) => {
+          const on = selecionados.includes(p.id);
+          return (
+            <label key={p.id} className="flex items-center gap-2 border rounded-md px-3 py-2 cursor-pointer"
+              style={{ borderColor: on ? C.orange : C.border, background: on ? "#fff8f4" : "#fff" }}>
+              <input type="checkbox" checked={on} onChange={() => toggle(p.id)} style={{ accentColor: C.orange }} />
+              <ProjIcon p={p} size={22} />
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold truncate" style={{ color: C.navy }}>{p.name}</span>
+                <span className="block text-[10px] truncate" style={{ color: C.gray }}>{p.client}</span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Administracao({ projetos, onCreateUser, onResetSenha, onDeleteUser, onUpdateProjeto, onDeleteProjeto, onSetProjetosUsuario }) {
   const [modal, setModal] = useState(false);
   const [usuarios, setUsuarios] = useState([]);
-  const [novo, setNovo] = useState({ nome: "", email: "", senha: "", papel: "cliente", projetoId: projetos[0]?.id || "" });
+  const [novo, setNovo] = useState({ nome: "", email: "", senha: "", papel: "cliente", projetoId: projetos[0]?.id || "", projetoIds: [] });
+  const [projAlvo, setProjAlvo] = useState(null); // usuário em edição de acessos
+  const [projSel, setProjSel] = useState([]);
+  const [projAcessoMsg, setProjAcessoMsg] = useState(null);
+  const [savingAcesso, setSavingAcesso] = useState(false);
   const [msg, setMsg] = useState(null); // {tipo:'ok'|'erro', texto}
   const [saving, setSaving] = useState(false);
   const [resetAlvo, setResetAlvo] = useState(null);
@@ -1304,6 +1341,17 @@ function Administracao({ projetos, onCreateUser, onResetSenha, onDeleteUser, onU
     } finally { setResetting(false); }
   };
 
+  const abrirAcessos = (u) => { setProjAlvo(u); setProjSel(u.projetoIds || []); setProjAcessoMsg(null); };
+  const salvarAcessos = async () => {
+    if (projSel.length === 0) { setProjAcessoMsg({ tipo: "erro", texto: "Marque ao menos um projeto." }); return; }
+    setSavingAcesso(true); setProjAcessoMsg(null);
+    try {
+      await onSetProjetosUsuario(projAlvo.id, projSel);
+      setProjAlvo(null); carregarUsuarios();
+    } catch (e) { setProjAcessoMsg({ tipo: "erro", texto: e.message || "Falha ao salvar acessos." }); }
+    finally { setSavingAcesso(false); }
+  };
+
   const carregarUsuarios = () => {
     if (!hasSupabase || typeof api.listUsuarios !== "function") return;
     api.listUsuarios().then(setUsuarios).catch((e) => console.error("usuarios:", e.message));
@@ -1313,11 +1361,14 @@ function Administracao({ projetos, onCreateUser, onResetSenha, onDeleteUser, onU
   const criar = async () => {
     if (!hasSupabase) { setMsg({ tipo: "erro", texto: "Disponível apenas com o banco conectado." }); return; }
     if (!novo.email || !novo.senha) { setMsg({ tipo: "erro", texto: "Preencha e-mail e senha." }); return; }
+    if (novo.papel === "consultor" && novo.projetoIds.length === 0) {
+      setMsg({ tipo: "erro", texto: "Marque ao menos um projeto para o consultor." }); return;
+    }
     setSaving(true); setMsg(null);
     try {
-      await onCreateUser({ email: novo.email.trim(), password: novo.senha, papel: novo.papel, nome: novo.nome, projetoId: novo.projetoId });
+      await onCreateUser({ email: novo.email.trim(), password: novo.senha, papel: novo.papel, nome: novo.nome, projetoId: novo.projetoId, projetoIds: novo.papel === "consultor" ? novo.projetoIds : [] });
       setMsg({ tipo: "ok", texto: `Conta criada para ${novo.email} (${papelLabel[novo.papel]}).` });
-      setNovo({ nome: "", email: "", senha: "", papel: "cliente", projetoId: projetos[0]?.id || "" });
+      setNovo({ nome: "", email: "", senha: "", papel: "cliente", projetoId: projetos[0]?.id || "", projetoIds: [] });
       carregarUsuarios();
     } catch (e) {
       setMsg({ tipo: "erro", texto: e.message || "Falha ao criar a conta." });
@@ -1348,7 +1399,7 @@ function Administracao({ projetos, onCreateUser, onResetSenha, onDeleteUser, onU
       </div>
       <div className="bg-white rounded-lg border p-5" style={{ borderColor: C.border }}>
         <div className="font-bold text-sm" style={{ color: C.navy }}>Criar conta de acesso</div>
-        <div className="text-[11px] mb-3" style={{ color: C.gray }}>Crie o usuário, defina o papel e, para cliente, o projeto que ele poderá ver</div>
+        <div className="text-[11px] mb-3" style={{ color: C.gray }}>Crie o usuário, defina o papel e os projetos que ele poderá ver</div>
         <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_130px_130px] gap-3 items-end">
           <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>NOME</div><input value={novo.nome} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} placeholder="Nome da pessoa" className="border rounded-md px-3 py-2 text-sm w-full" style={{ borderColor: C.border }} /></div>
           <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>E-MAIL</div><input value={novo.email} onChange={(e) => setNovo({ ...novo, email: e.target.value })} placeholder="pessoa@empresa.com" className="border rounded-md px-3 py-2 text-sm w-full" style={{ borderColor: C.border }} /></div>
@@ -1364,6 +1415,12 @@ function Administracao({ projetos, onCreateUser, onResetSenha, onDeleteUser, onU
               {projetos.map((p) => <option key={p.id} value={p.id}>{p.name} — {p.client}</option>)}
             </select></div>
         )}
+        {novo.papel === "consultor" && (
+          <div className="mt-4">
+            <SeletorProjetos projetos={projetos} selecionados={novo.projetoIds}
+              onChange={(ids) => setNovo({ ...novo, projetoIds: ids })} />
+          </div>
+        )}
         <div className="flex items-center gap-3 mt-4">
           <button onClick={criar} disabled={saving} className="rounded-md px-5 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.navy }}>{saving ? "Criando…" : "Criar conta"}</button>
           {msg && <span className="text-sm font-semibold" style={{ color: msg.tipo === "ok" ? C.green : C.red }}>{msg.texto}</span>}
@@ -1376,7 +1433,17 @@ function Administracao({ projetos, onCreateUser, onResetSenha, onDeleteUser, onU
               <span className="text-sm font-semibold" style={{ color: C.navy }}>{u.nome || u.email}</span>
               <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: "#eef1f6", color: C.blue }}>{papelLabel[u.papel] || u.papel}</span>
               <span className="text-[11px]" style={{ color: C.gray }}>{u.email}</span>
+              {u.papel === "consultor" && (
+                <span className="text-[11px] truncate" style={{ color: (u.projetoIds || []).length ? C.navyMed : C.red }}>
+                  {(u.projetoIds || []).length
+                    ? projetos.filter((p) => u.projetoIds.includes(p.id)).map((p) => p.name).join(", ")
+                    : "sem projeto liberado"}
+                </span>
+              )}
               <div className="ml-auto flex gap-2 shrink-0">
+                {u.papel === "consultor" && (
+                  <button onClick={() => abrirAcessos(u)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.orange, color: C.orange }}>Projetos</button>
+                )}
                 <button onClick={() => { setResetAlvo(u.email); setResetPw(""); setResetMsg(null); }} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Redefinir senha</button>
                 <button onClick={() => excluirUsuario(u.email)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.red }}>Excluir</button>
               </div>
@@ -1406,6 +1473,17 @@ function Administracao({ projetos, onCreateUser, onResetSenha, onDeleteUser, onU
             <button onClick={salvarProj} disabled={savingProj} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{savingProj ? "Salvando…" : "Salvar"}</button>
             <button onClick={() => setEditProj(null)} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
             <button onClick={excluirProj} disabled={savingProj} className="ml-auto border rounded-md px-4 py-2 text-sm font-semibold" style={{ borderColor: C.border, color: C.red }}>Excluir projeto</button>
+          </div>
+        </Modal>
+      )}
+      {projAlvo && (
+        <Modal title={`Projetos com acesso — ${projAlvo.nome || projAlvo.email}`} onClose={() => setProjAlvo(null)}>
+          <p className="text-[13px] mb-3" style={{ color: C.gray }}>Marque os projetos que <b>{projAlvo.email}</b> poderá visualizar.</p>
+          <SeletorProjetos projetos={projetos} selecionados={projSel} onChange={setProjSel} label="PROJETOS" />
+          {projAcessoMsg && <div className="text-sm mt-3 rounded-md px-3 py-2" style={{ background: "#fee2e2", color: C.red }}>{projAcessoMsg.texto}</div>}
+          <div className="flex gap-2 mt-4">
+            <button onClick={salvarAcessos} disabled={savingAcesso} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{savingAcesso ? "Salvando…" : "Salvar acessos"}</button>
+            <button onClick={() => setProjAlvo(null)} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
           </div>
         </Modal>
       )}
@@ -1456,6 +1534,28 @@ function Modal({ title, children, onClose }) {
     </div>
   );
 }
+// Aviso fixo no rodapé — usado para falhas de gravação, que antes só iam ao console.
+function Aviso({ aviso, onClose }) {
+  const erro = aviso?.tipo === "erro";
+  // sucesso desaparece sozinho; erro fica até o usuário fechar
+  useEffect(() => {
+    if (!aviso || erro) return;
+    const t = setTimeout(onClose, 4000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aviso, erro]);
+  if (!aviso) return null;
+  return (
+    <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] max-w-lg w-[calc(100%-2rem)]">
+      <div className="rounded-lg shadow-2xl px-4 py-3 flex items-start gap-3"
+        style={{ background: erro ? "#fee2e2" : "#dcfce7", border: `1px solid ${erro ? C.red : C.green}` }}>
+        <span className="text-sm font-semibold flex-1" style={{ color: erro ? C.red : C.green }}>{aviso.texto}</span>
+        <button onClick={onClose} className="shrink-0 mt-0.5" aria-label="Fechar aviso"><X size={14} color={erro ? C.red : C.green} /></button>
+      </div>
+    </div>
+  );
+}
+
 function PwInput({ value, onChange, onEnter, placeholder = "••••••••", wrap = "mb-4" }) {
   const [show, setShow] = useState(false);
   return (
@@ -1685,6 +1785,20 @@ export default function App() {
   const [recovery, setRecovery] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [changePwOpen, setChangePwOpen] = useState(false);
+  const [aviso, setAviso] = useState(null); // {tipo:'erro'|'ok', texto}
+
+  // Traduz erro técnico do banco em algo compreensível para quem não é técnico.
+  const falhou = (contexto, e) => {
+    console.error(`${contexto}:`, e?.message);
+    const m = String(e?.message || "");
+    const semPermissao = /row-level security|permission denied|violates row-level/i.test(m);
+    setAviso({
+      tipo: "erro",
+      texto: semPermissao
+        ? "Você não tem permissão para alterar este projeto. Nada foi salvo."
+        : `Não foi possível salvar (${contexto}). Nada foi gravado — tente novamente.`,
+    });
+  };
 
   const [acoesState, setAcoesState] = useState(GOSTO_ACOES);
   const [respState, setRespState] = useState(RESPONSAVEIS);
@@ -1740,10 +1854,22 @@ export default function App() {
   useEffect(() => {
     if (!logged || !hasSupabase) return;
     (async () => {
-      try { const ps = await api.listProjetos(); if (ps.length) { setProjetos(ps); setProject((cur) => ps.find((p) => p.id === cur.id) || ps[0]); setScopeIds((cur) => cur.filter((id) => ps.some((p) => p.id === id)).length ? cur : [(ps.find((p) => scopeIds.includes(p.id)) || ps[0]).id]); } } catch (e) { console.error("projetos:", e.message); }
+      try {
+        const todos = await api.listProjetos();
+        // consultor só enxerga os projetos liberados em perfil_projetos
+        const permitidos = perfil?.papel === "consultor"
+          ? todos.filter((p) => (perfil.projetoIds || []).includes(p.id))
+          : todos;
+        const ps = permitidos;
+        if (ps.length) { setProjetos(ps); setProject((cur) => ps.find((p) => p.id === cur.id) || ps[0]); setScopeIds((cur) => cur.filter((id) => ps.some((p) => p.id === id)).length ? cur : [(ps.find((p) => scopeIds.includes(p.id)) || ps[0]).id]); }
+        else if (perfil?.papel === "consultor") { setProjetos([]); setScopeIds([]); }
+      } catch (e) {
+        console.error("projetos:", e.message);
+        setAviso({ tipo: "erro", texto: "Não foi possível carregar os projetos. Verifique seu acesso com o administrador." });
+      }
       try { const ss = await api.listSolicitacoes(); setSolic(ss); } catch (e) { console.error("solicitacoes:", e.message); }
     })();
-  }, [logged]);
+  }, [logged, perfil]);
 
   const projById = (id) => projetos.find((p) => p.id === id) || PROJ(id);
 
@@ -1801,15 +1927,16 @@ export default function App() {
           responsavel_id, data_abertura: asISO(form.ab), fecho_planejado: asISO(form.fp), fecho_real: asISO(form.fr), status: form.st,
         });
         await loadScope(scopeIds);
+        setAviso({ tipo: "ok", texto: "Ação salva." });
         return;
-      } catch (e) { console.error("createAcao:", e.message); }
+      } catch (e) { falhou("nova ação", e); return; }
     }
     setAcoesState((prev) => [...prev, { id: codigo, acao: form.descricao, fase: form.fase, origem: form.origem, resp: form.resp, ab: form.ab || "–", fp: form.fp || "–", fr: form.fr || "–", st: form.st }]);
   };
   const handleDeleteAcao = async (codigo) => {
     if (hasSupabase) {
       try { await api.deleteAcao(codigo); await loadScope(scopeIds); return; }
-      catch (e) { console.error("deleteAcao:", e.message); }
+      catch (e) { falhou("excluir ação", e); return; }
     }
     setAcoesState((prev) => prev.filter((a) => a.id !== codigo));
   };
@@ -1823,7 +1950,7 @@ export default function App() {
         });
         await loadScope(scopeIds);
         return;
-      } catch (e) { console.error("updateAcao:", e.message); }
+      } catch (e) { falhou("editar ação", e); return; }
     }
     setAcoesState((prev) => prev.map((a) => a.id === codigo ? { ...a, acao: form.descricao, fase: form.fase, origem: form.origem, resp: form.resp, ab: form.ab || "–", fp: form.fp || "–", fr: form.fr || "–", st: form.st } : a));
   };
@@ -1831,14 +1958,14 @@ export default function App() {
     const is_pwr = form.empresa === "PWR Gestão";
     if (hasSupabase) {
       try { const r = await api.createResponsavel(project.id, { nome: form.nome, empresa: form.empresa, papel: form.papel, email: form.email, is_pwr }); setRespState((prev) => [...prev, r]); return; }
-      catch (e) { console.error("createResponsavel:", e.message); }
+      catch (e) { falhou("novo responsável", e); return; }
     }
     setRespState((prev) => [...prev, { nome: form.nome, empresa: form.empresa, pwr: is_pwr, papel: form.papel, email: form.email }]);
   };
   const handleCreateDocumento = async (form) => {
     if (hasSupabase) {
       try { await api.createDocumento(project.id, { nome: form.nome, tipo: form.tipo, link_drive: form.link, data: new Date().toISOString().slice(0, 10) }); await loadScope(scopeIds); return; }
-      catch (e) { console.error("createDocumento:", e.message); }
+      catch (e) { falhou("registrar documento", e); return; }
     }
     const hoje = new Date(); const dd = String(hoje.getDate()).padStart(2, "0"), mm = String(hoje.getMonth() + 1).padStart(2, "0"), yy = String(hoje.getFullYear()).slice(2);
     setDocState((prev) => [{ tipo: form.tipo, data: `${dd}/${mm}/${yy}`, nome: form.nome, link: form.link || "https://drive.google.com/" }, ...prev]);
@@ -1846,7 +1973,7 @@ export default function App() {
   const handleCreateSolicitacao = async (form) => {
     if (hasSupabase) {
       try { await api.createSolicitacao({ tipo: form.tipo, descricao: form.descricao, projeto_id: form.projetoId || null, solicitante_email: perfil?.email || "demo@pwrgestao.com" }); const ss = await api.listSolicitacoes(); setSolic(ss); return; }
-      catch (e) { console.error("createSolicitacao:", e.message); }
+      catch (e) { falhou("registrar solicitação", e); return; }
     }
     const hoje = new Date(); const dd = String(hoje.getDate()).padStart(2, "0"), mm = String(hoje.getMonth() + 1).padStart(2, "0"), yy = String(hoje.getFullYear()).slice(2);
     setSolic((prev) => [{ data: `${dd}/${mm}/${yy}`, quem: "demo@pwrgestao.com", tipo: form.tipo, proj: "—", desc: form.descricao, st: "Aberta" }, ...prev]);
@@ -1854,12 +1981,15 @@ export default function App() {
   const handleUpdateSolicitacao = async (id, payload) => {
     if (hasSupabase) {
       try { await api.updateSolicitacao(id, payload); const ss = await api.listSolicitacoes(); setSolic(ss); return; }
-      catch (e) { console.error("updateSolicitacao:", e.message); }
+      catch (e) { falhou("atualizar solicitação", e); return; }
     }
     setSolic((prev) => prev.map((s) => s.id === id ? { ...s, st: payload.status ?? s.st, fechamento: payload.data_fechamento || s.fechamento, obs: payload.observacao ?? s.obs } : s));
   };
   const handleSaveFollowup = async (form) => {
-    if (hasSupabase) { try { await api.saveFollowup(project.id, form); return; } catch (e) { console.error("saveFollowup:", e.message); } }
+    if (hasSupabase) {
+      try { await api.saveFollowup(project.id, form); setAviso({ tipo: "ok", texto: "Follow-up salvo no banco." }); return; }
+      catch (e) { falhou("salvar follow-up", e); return; }
+    }
     // modo mock: nada a persistir
   };
   const handleFillAta = async () => {
@@ -1877,7 +2007,7 @@ export default function App() {
           decisoes: ATA_EXAMPLE.decisoes.map((texto) => ({ texto, responsavel: "" })),
         }, enc);
         await loadScope(scopeIds);
-      } catch (e) { console.error("saveAta:", e.message); }
+      } catch (e) { falhou("emitir ATA", e); return; }
     } else if (project.id === "gosto" && !acoesState.some((a) => a.id === "GOS-18")) {
       setAcoesState((prev) => [...prev, ...GOSTO_ATA_EXTRA]);
     }
@@ -1886,7 +2016,13 @@ export default function App() {
 
   const handleCreateUser = async (payload) => { await api.createUserAsAdmin(payload); };
   const handleDeleteUser = async (email) => { await api.deleteUsuario(email); };
-  const refreshProjetos = async () => { if (hasSupabase) { const ps = await api.listProjetos(); if (ps.length) { setProjetos(ps); setScopeIds((cur) => cur.filter((id) => ps.some((p) => p.id === id)).length ? cur : [ps[0].id]); } } };
+  const handleSetProjetosUsuario = async (perfilId, projetoIds) => { await api.setProjetosDoPerfil(perfilId, projetoIds); };
+  const refreshProjetos = async () => {
+    if (!hasSupabase) return;
+    const todos = await api.listProjetos();
+    const ps = perfil?.papel === "consultor" ? todos.filter((p) => (perfil.projetoIds || []).includes(p.id)) : todos;
+    if (ps.length) { setProjetos(ps); setScopeIds((cur) => cur.filter((id) => ps.some((p) => p.id === id)).length ? cur : [ps[0].id]); }
+  };
   const handleUpdateProjeto = async (id, payload) => { await api.updateProjeto(id, payload); await refreshProjetos(); };
   const handleDeleteProjeto = async (id) => { await api.deleteProjeto(id); await refreshProjetos(); };
   const handleMoveAcao = async (action, novoStatus) => {
@@ -1895,7 +2031,7 @@ export default function App() {
     if (novoStatus === "Finalizada" && (!action.fr || action.fr === "–")) payload.fecho_real = new Date().toISOString().slice(0, 10);
     if (hasSupabase) {
       try { await api.updateAcao(action.id, payload); await loadScope(scopeIds); return; }
-      catch (e) { console.error("move:", e.message); }
+      catch (e) { falhou("mover ação", e); return; }
     }
     setAcoesState((prev) => prev.map((a) => a.id === action.id ? { ...a, st: novoStatus, ...(payload.fecho_real ? { fr: payload.fecho_real } : {}) } : a));
   };
@@ -1903,6 +2039,7 @@ export default function App() {
     const prefix = project.id.slice(0, 3).toUpperCase();
     let max = acoesState.reduce((m, a) => Math.max(m, numFrom(a.id)), 0);
     if (hasSupabase) {
+      let ok = 0; let erro = null;
       for (const r of rows) {
         max += 1;
         const responsavel_id = respState.find((x) => x.nome === r.resp)?.id || null;
@@ -1911,9 +2048,14 @@ export default function App() {
             codigo: `${prefix}-${max}`, descricao: r.descricao, fase: r.fase || "Diagnóstico",
             origem: r.origem || "Ata", responsavel_id, data_abertura: asISO(r.ab), fecho_planejado: asISO(r.fp), status: r.st || "Aberta",
           });
-        } catch (e) { console.error("import:", e.message); }
+          ok += 1;
+        } catch (e) { console.error("import:", e.message); erro = e; }
       }
       await loadScope(scopeIds);
+      // importa o que for possível e informa o resultado real
+      if (ok === rows.length) setAviso({ tipo: "ok", texto: `${ok} ${ok === 1 ? "ação importada" : "ações importadas"} com sucesso.` });
+      else if (ok === 0) falhou("importar planilha", erro);
+      else setAviso({ tipo: "erro", texto: `Apenas ${ok} de ${rows.length} ações foram importadas. As demais falharam.` });
     } else {
       setAcoesState((prev) => [...prev, ...rows.map((r, i) => ({ id: `${prefix}-${max + 1 + i}`, acao: r.descricao, fase: r.fase, origem: r.origem, resp: r.resp, ab: r.ab || "–", fp: r.fp || "–", fr: "–", st: r.st || "Aberta" }))]);
     }
@@ -1951,7 +2093,7 @@ export default function App() {
       case "responsaveis": return <>{nota}<Responsaveis project={project} projetos={projetos} responsaveis={respState} actions={acoesState.filter((a) => !a.projId || a.projId === project?.id)} onCreate={handleCreateResponsavel} /></>;
       case "documentos": return <>{nota}<Documentos project={project} documentos={docState} onCreate={handleCreateDocumento} /></>;
       case "solicitacoes": return <Solicitacoes solicitacoes={solic} projetos={projetos} onCreate={handleCreateSolicitacao} onUpdate={handleUpdateSolicitacao} />;
-      case "administracao": return <Administracao projetos={projetos} onCreateUser={handleCreateUser} onResetSenha={handleResetSenha} onDeleteUser={handleDeleteUser} onUpdateProjeto={handleUpdateProjeto} onDeleteProjeto={handleDeleteProjeto} />;
+      case "administracao": return <Administracao projetos={projetos} onCreateUser={handleCreateUser} onResetSenha={handleResetSenha} onDeleteUser={handleDeleteUser} onUpdateProjeto={handleUpdateProjeto} onDeleteProjeto={handleDeleteProjeto} onSetProjetosUsuario={handleSetProjetosUsuario} />;
       default: return null;
     }
   };
@@ -1964,6 +2106,7 @@ export default function App() {
         <main className="flex-1 overflow-y-auto p-6 min-h-0">{render()}</main>
       </div>
       {changePwOpen && <ChangePasswordModal onClose={() => setChangePwOpen(false)} />}
+      <Aviso aviso={aviso} onClose={() => setAviso(null)} />
     </div>
   );
 }
