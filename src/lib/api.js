@@ -65,18 +65,36 @@ export async function deleteAcao(codigo) {
 }
 
 // ---- RESPONSÁVEIS ----
+const mapResp = (r) => ({ id: r.id, nome: r.nome, empresa: r.empresa, pwr: r.is_pwr, papel: r.papel, email: r.email })
+
 export async function listResponsaveis(projetoId) {
   const { data, error } = await supabase
     .from('responsaveis').select('*').eq('projeto_id', projetoId).order('created_at')
   if (error) throw error
-  return data.map((r) => ({ id: r.id, nome: r.nome, empresa: r.empresa, pwr: r.is_pwr, papel: r.papel, email: r.email }))
+  return data.map(mapResp)
 }
 
 export async function createResponsavel(projetoId, payload) {
   const { data, error } = await supabase.from('responsaveis')
     .insert({ projeto_id: projetoId, ...payload }).select().single()
   if (error) throw error
-  return { id: data.id, nome: data.nome, empresa: data.empresa, pwr: data.is_pwr, papel: data.papel, email: data.email }
+  return mapResp(data)
+}
+
+export async function updateResponsavel(id, payload) {
+  const { error } = await supabase.from('responsaveis')
+    .update({ ...payload, updated_at: new Date().toISOString() }).eq('id', id)
+  if (error) throw error
+}
+
+// Solta as ações antes de apagar: o FK acoes.responsavel_id barraria o delete.
+// Evita depender de `on delete set null` no schema, que não é versionado aqui.
+export async function deleteResponsavel(id) {
+  const { error: eAcoes } = await supabase.from('acoes')
+    .update({ responsavel_id: null }).eq('responsavel_id', id)
+  if (eAcoes) throw eAcoes
+  const { error } = await supabase.from('responsaveis').delete().eq('id', id)
+  if (error) throw error
 }
 
 // ---- DOCUMENTOS ----
@@ -224,6 +242,12 @@ export async function createUserAsAdmin({ email, password, papel, nome, projetoI
     await setProjetosDoPerfil(perfilId, projetoIds)
   }
   return data
+}
+// Nome e papel vivem em `perfis`, que a policy perfis_admin_write libera para admin.
+// E-mail e senha são do Auth e continuam pela Edge Function / "Redefinir senha".
+export async function updateUsuario(perfilId, payload) {
+  const { error } = await supabase.from('perfis').update(payload).eq('id', perfilId)
+  if (error) throw error
 }
 export async function deleteUsuario(email) {
   const { data, error } = await supabase.functions.invoke('admin-usuarios', {

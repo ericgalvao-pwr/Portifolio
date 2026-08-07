@@ -691,6 +691,11 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelet
     (f.fase === "Todas" || a.fase === f.fase) && (f.resp === "Todas" || a.resp === f.resp) &&
     (f.st === "Todos" || effStatus(a) === f.st) && (f.origem === "Todas" || a.origem === f.origem));
 
+  // no modo multi a ação editada pode ser de outro projeto — o select de responsável
+  // tem que seguir o projeto dela, não o primário do escopo.
+  const projDaAcao = editing?.projId || project.id;
+  const respsDoProjeto = responsaveis.filter((r) => (r.projId || project.id) === projDaAcao);
+
   const abrirNova = () => { setEditing(null); setForm(vazio); setModal(true); };
   const abrirEdicao = (a) => {
     setEditing(a);
@@ -713,7 +718,13 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelet
     if (!file) return;
     const nome = file.name.toLowerCase();
     const reader = new FileReader();
-    const processar = (rows) => { if (rows.length) onImport(rows); else alert("Nenhuma linha reconhecida no arquivo."); };
+    const processar = (rows) => {
+      if (!rows.length) { alert("Nenhuma linha reconhecida no arquivo."); return; }
+      // com vários projetos no escopo o destino não é óbvio — confirma antes de
+      // despejar a planilha inteira no projeto errado.
+      if (multi && !window.confirm(`Importar ${rows.length} ${rows.length === 1 ? "ação" : "ações"} para o projeto "${project.name}"?`)) return;
+      onImport(rows);
+    };
     if (nome.endsWith(".xlsx") || nome.endsWith(".xls")) {
       reader.onload = () => {
         try {
@@ -751,11 +762,9 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelet
         right={
           <div className="flex gap-2">
             <button onClick={exportar} className="border rounded-md px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5" style={{ borderColor: C.border, color: C.navy }}><Download size={14} /> Exportar CSV</button>
-            {!multi && <>
-              <button onClick={() => fileRef.current?.click()} className="border rounded-md px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5" style={{ borderColor: C.border, color: C.navy }}><Upload size={14} /> Importar GSB</button>
-              <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={importar} className="hidden" />
-              <button onClick={abrirNova} className="rounded-md px-3 py-1.5 text-sm font-bold text-white flex items-center gap-1.5" style={{ background: C.orange }}><Plus size={14} /> Nova ação</button>
-            </>}
+            <button onClick={() => fileRef.current?.click()} className="border rounded-md px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5" style={{ borderColor: C.border, color: C.navy }}><Upload size={14} /> Importar GSB</button>
+            <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={importar} className="hidden" />
+            <button onClick={abrirNova} className="rounded-md px-3 py-1.5 text-sm font-bold text-white flex items-center gap-1.5" style={{ background: C.orange }}><Plus size={14} /> Nova ação</button>
           </div>
         } />
       <div className="flex gap-3 items-end mb-4 flex-wrap">
@@ -769,7 +778,7 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelet
         <table className="w-full text-sm">
           <thead>
             <tr className="text-[11px] font-semibold text-left" style={{ color: C.gray }}>
-              {[...(multi ? ["PROJETO"] : []), "ID", "AÇÃO", "FASE", "ORIGEM", "RESPONSÁVEL", "ABERTURA", "FECH. PLAN.", "FECH. REAL", "STATUS", ...(!multi ? [""] : [])].map((h, i) => <th key={h || `x${i}`} className="px-4 py-3">{h}</th>)}
+              {[...(multi ? ["PROJETO"] : []), "ID", "AÇÃO", "FASE", "ORIGEM", "RESPONSÁVEL", "ABERTURA", "FECH. PLAN.", "FECH. REAL", "STATUS", ""].map((h, i) => <th key={h || `x${i}`} className="px-4 py-3">{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -785,17 +794,17 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelet
                 <td className="px-4 py-3" style={{ color: C.gray }}>{a.fp}</td>
                 <td className="px-4 py-3" style={{ color: C.gray }}>{a.fr}</td>
                 <td className="px-4 py-3"><StatusBadge st={effStatus(a)} /></td>
-                {!multi && <td className="px-4 py-3"><div className="flex gap-2">
+                <td className="px-4 py-3"><div className="flex gap-2">
                   <button onClick={() => abrirEdicao(a)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Editar</button>
                   <button onClick={() => { if (window.confirm(`Excluir a ação "${a.acao}"? Esta ação não pode ser desfeita.`)) onDelete(a.id); }} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.red }}>Excluir</button>
-                </div></td>}
+                </div></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       {modal && (
-        <Modal title={editing ? `Editar ${editing.id}` : `Nova ação — ${project.name}`} onClose={() => { setModal(false); setEditing(null); }}>
+        <Modal title={editing ? `Editar ${editing.id}${multi && editing.projName ? ` — ${editing.projName}` : ""}` : `Nova ação — ${project.name}`} onClose={() => { setModal(false); setEditing(null); }}>
           <div className="mb-3"><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>AÇÃO</div>
             <input value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Descreva a ação" className={inp} style={{ borderColor: C.border }} /></div>
           <div className="grid grid-cols-2 gap-3">
@@ -806,7 +815,8 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelet
           </div>
           <div className="mt-3"><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>RESPONSÁVEL</div>
             <select value={form.resp} onChange={(e) => setForm({ ...form, resp: e.target.value })} className={`${inp} bg-white`} style={{ borderColor: C.border }}>
-              <option value="">Selecione</option>{responsaveis.map((r) => <option key={r.email || r.nome}>{r.nome}</option>)}
+              {/* só os do projeto da ação — no modo multi a lista traz o escopo todo */}
+              <option value="">Selecione</option>{respsDoProjeto.map((r) => <option key={r.id || r.email || r.nome}>{r.nome}</option>)}
             </select></div>
           <div className="grid grid-cols-3 gap-3 mt-3">
             <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>ABERTURA</div><input type="date" value={form.ab} onChange={(e) => setForm({ ...form, ab: e.target.value })} className={inp} style={{ borderColor: C.border }} /></div>
@@ -1075,37 +1085,46 @@ function EmissaoAta({ project, onFill, filled }) {
   );
 }
 
-function Responsaveis({ project, projetos, responsaveis, actions, onCreate }) {
+function Responsaveis({ project, projetos, responsaveis, actions, onCreate, onUpdate, onDelete }) {
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ nome: "", empresa: project.client || "PWR Gestão", papel: "", email: "" });
+  const [editing, setEditing] = useState(null);
+  const vazio = { nome: "", empresa: project.client || "PWR Gestão", papel: "", email: "" };
+  const [form, setForm] = useState(vazio);
   const [saving, setSaving] = useState(false);
   const empresas = ["PWR Gestão", ...[...new Set((projetos || []).map((p) => p.client).filter(Boolean))]];
   const countByNome = useMemo(() => {
     const m = {}; actions.forEach((a) => { if (a.resp) m[a.resp] = (m[a.resp] || 0) + 1; }); return m;
   }, [actions]);
+  const abrirNovo = () => { setEditing(null); setForm(vazio); setModal(true); };
+  const abrirEdicao = (r) => {
+    setEditing(r);
+    setForm({ nome: r.nome, empresa: r.empresa, papel: r.papel || "", email: r.email || "" });
+    setModal(true);
+  };
   const salvar = async () => {
     if (!form.nome.trim()) return;
-    setSaving(true); await onCreate(form); setSaving(false); setModal(false);
-    setForm({ nome: "", empresa: project.client || "PWR Gestão", papel: "", email: "" });
+    setSaving(true);
+    if (editing) await onUpdate(editing.id, form); else await onCreate(form);
+    setSaving(false); setModal(false); setEditing(null); setForm(vazio);
   };
   return (
     <div>
       <PageHeader title={`Responsáveis — ${project.name}`} subtitle="Lista de referência que alimenta o campo Responsável das ações"
-        right={<button onClick={() => setModal(true)} className="rounded-md px-3 py-1.5 text-sm font-bold text-white flex items-center gap-1.5" style={{ background: C.orange }}><Plus size={14} /> Novo responsável</button>} />
+        right={<button onClick={abrirNovo} className="rounded-md px-3 py-1.5 text-sm font-bold text-white flex items-center gap-1.5" style={{ background: C.orange }}><Plus size={14} /> Novo responsável</button>} />
       <div className="bg-white rounded-lg border overflow-x-auto" style={{ borderColor: C.border }}>
         <table className="w-full text-sm">
           <thead><tr className="text-[11px] font-semibold text-left" style={{ color: C.gray }}>{["NOME", "EMPRESA", "PAPEL / FUNÇÃO", "E-MAIL", "AÇÕES", ""].map((h) => <th key={h} className="px-4 py-3">{h}</th>)}</tr></thead>
           <tbody>
             {responsaveis.map((r) => (
-              <tr key={r.email || r.nome} className="border-t" style={{ borderColor: C.border }}>
+              <tr key={r.id || r.email || r.nome} className="border-t" style={{ borderColor: C.border }}>
                 <td className="px-4 py-3 font-bold" style={{ color: C.navy }}>{r.nome}</td>
                 <td className="px-4 py-3"><span className="text-xs font-semibold" style={{ color: r.pwr ? C.orange : C.blue }}>{r.empresa}</span></td>
                 <td className="px-4 py-3" style={{ color: C.navyMed }}>{r.papel}</td>
                 <td className="px-4 py-3" style={{ color: C.gray }}>{r.email}</td>
                 <td className="px-4 py-3" style={{ color: C.navyMed }}>{countByNome[r.nome] || 0} ações</td>
                 <td className="px-4 py-3"><div className="flex gap-2">
-                  <button className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Editar</button>
-                  <button className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.red }}>Excluir</button>
+                  <button onClick={() => abrirEdicao(r)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Editar</button>
+                  <button onClick={() => { const n = countByNome[r.nome] || 0; if (window.confirm(`Excluir o responsável "${r.nome}"?${n ? ` As ${n} ${n === 1 ? "ação dele ficará" : "ações dele ficarão"} sem responsável.` : ""} Não pode ser desfeito.`)) onDelete(r.id); }} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.red }}>Excluir</button>
                 </div></td>
               </tr>
             ))}
@@ -1113,7 +1132,7 @@ function Responsaveis({ project, projetos, responsaveis, actions, onCreate }) {
         </table>
       </div>
       {modal && (
-        <Modal title="Novo responsável" onClose={() => setModal(false)}>
+        <Modal title={editing ? "Editar responsável" : "Novo responsável"} onClose={() => { setModal(false); setEditing(null); }}>
           <LabeledInput label="NOME" ph="Nome completo" value={form.nome} onChange={(v) => setForm({ ...form, nome: v })} />
           <div className="mb-3">
             <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>EMPRESA</div>
@@ -1124,8 +1143,8 @@ function Responsaveis({ project, projetos, responsaveis, actions, onCreate }) {
           <LabeledInput label="PAPEL / FUNÇÃO" ph="Ex: Consultor, Gerente..." value={form.papel} onChange={(v) => setForm({ ...form, papel: v })} />
           <LabeledInput label="E-MAIL" ph="pessoa@empresa.com" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
           <div className="flex gap-2 mt-4">
-            <button onClick={salvar} disabled={saving} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{saving ? "Salvando…" : "Salvar"}</button>
-            <button onClick={() => setModal(false)} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
+            <button onClick={salvar} disabled={saving} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{saving ? "Salvando…" : (editing ? "Salvar alterações" : "Salvar")}</button>
+            <button onClick={() => { setModal(false); setEditing(null); }} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
           </div>
         </Modal>
       )}
@@ -1287,7 +1306,7 @@ function SeletorProjetos({ projetos, selecionados, onChange, label = "PROJETOS C
   );
 }
 
-function Administracao({ projetos, onCreateUser, onResetSenha, onDeleteUser, onUpdateProjeto, onDeleteProjeto, onSetProjetosUsuario }) {
+function Administracao({ projetos, onCreateUser, onResetSenha, onUpdateUser, onDeleteUser, onUpdateProjeto, onDeleteProjeto, onSetProjetosUsuario }) {
   const [modal, setModal] = useState(false);
   const [usuarios, setUsuarios] = useState([]);
   const [novo, setNovo] = useState({ nome: "", email: "", senha: "", papel: "cliente", projetoId: projetos[0]?.id || "", projetoIds: [] });
@@ -1301,6 +1320,10 @@ function Administracao({ projetos, onCreateUser, onResetSenha, onDeleteUser, onU
   const [resetPw, setResetPw] = useState("");
   const [resetMsg, setResetMsg] = useState(null);
   const [resetting, setResetting] = useState(false);
+  const [editUser, setEditUser] = useState(null);
+  const [uf, setUf] = useState({ nome: "", papel: "cliente" });
+  const [savingUser, setSavingUser] = useState(false);
+  const [userMsg, setUserMsg] = useState(null);
   const [editProj, setEditProj] = useState(null);
   const [pf, setPf] = useState({ nome: "", cliente: "", regiao: "Nordeste", uf: "CE", status: "Ativo" });
   const [savingProj, setSavingProj] = useState(false);
@@ -1322,6 +1345,15 @@ function Administracao({ projetos, onCreateUser, onResetSenha, onDeleteUser, onU
     try { await onDeleteProjeto(editProj.id); setEditProj(null); }
     catch (e) { setProjMsg({ tipo: "erro", texto: e.message || "Falha ao excluir." }); }
     finally { setSavingProj(false); }
+  };
+  const abrirEdicaoUser = (u) => { setEditUser(u); setUf({ nome: u.nome || "", papel: u.papel }); setUserMsg(null); };
+  const salvarUser = async () => {
+    setSavingUser(true); setUserMsg(null);
+    try {
+      await onUpdateUser(editUser.id, { nome: uf.nome, papel: uf.papel });
+      setEditUser(null); carregarUsuarios();
+    } catch (e) { setUserMsg({ tipo: "erro", texto: e.message || "Falha ao salvar." }); }
+    finally { setSavingUser(false); }
   };
   const excluirUsuario = async (email) => {
     if (!window.confirm(`Excluir o acesso de ${email}? Não pode ser desfeito.`)) return;
@@ -1444,6 +1476,7 @@ function Administracao({ projetos, onCreateUser, onResetSenha, onDeleteUser, onU
                 {u.papel === "consultor" && (
                   <button onClick={() => abrirAcessos(u)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.orange, color: C.orange }}>Projetos</button>
                 )}
+                <button onClick={() => abrirEdicaoUser(u)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Editar</button>
                 <button onClick={() => { setResetAlvo(u.email); setResetPw(""); setResetMsg(null); }} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Redefinir senha</button>
                 <button onClick={() => excluirUsuario(u.email)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.red }}>Excluir</button>
               </div>
@@ -1451,6 +1484,26 @@ function Administracao({ projetos, onCreateUser, onResetSenha, onDeleteUser, onU
           ))}
         </div>
       </div>
+      {editUser && (
+        <Modal title={`Editar usuário — ${editUser.email}`} onClose={() => setEditUser(null)}>
+          <LabeledInput label="NOME" ph="Nome completo" value={uf.nome} onChange={(v) => setUf({ ...uf, nome: v })} />
+          <div className="mb-1">
+            <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>PAPEL</div>
+            <select value={uf.papel} onChange={(e) => setUf({ ...uf, papel: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}>
+              {["cliente", "consultor", "admin"].map((p) => <option key={p} value={p}>{papelLabel[p]}</option>)}
+            </select>
+          </div>
+          {uf.papel === "consultor" && (editUser.projetoIds || []).length === 0 && (
+            <p className="text-[11px] mt-2" style={{ color: C.red }}>Consultor sem projeto liberado não enxerga nada. Depois de salvar, use o botão “Projetos”.</p>
+          )}
+          <p className="text-[11px] mt-2" style={{ color: C.gray }}>E-mail e senha não mudam aqui — use “Redefinir senha”.</p>
+          {userMsg && <div className="text-sm mt-3 rounded-md px-3 py-2" style={{ background: "#fee2e2", color: C.red }}>{userMsg.texto}</div>}
+          <div className="flex gap-2 mt-4">
+            <button onClick={salvarUser} disabled={savingUser} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{savingUser ? "Salvando…" : "Salvar alterações"}</button>
+            <button onClick={() => setEditUser(null)} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
+          </div>
+        </Modal>
+      )}
       {editProj && (
         <Modal title={`Editar projeto — ${editProj.name}`} onClose={() => setEditProj(null)}>
           <div className="grid grid-cols-2 gap-3">
@@ -1792,10 +1845,13 @@ export default function App() {
     console.error(`${contexto}:`, e?.message);
     const m = String(e?.message || "");
     const semPermissao = /row-level security|permission denied|violates row-level/i.test(m);
+    const duplicado = /duplicate key|already exists|unique constraint|já existe/i.test(m);
     setAviso({
       tipo: "erro",
       texto: semPermissao
         ? "Você não tem permissão para alterar este projeto. Nada foi salvo."
+        : duplicado
+        ? "Já existe um registro ativo com esse e-mail neste projeto. Nada foi salvo."
         : `Não foi possível salvar (${contexto}). Nada foi gravado — tente novamente.`,
     });
   };
@@ -1812,7 +1868,13 @@ export default function App() {
   }, []);
 
   // sessão Supabase Auth: papel vem do perfil, não de um seletor
+  // O supabase-js reemite SIGNED_IN/TOKEN_REFRESHED sempre que a aba volta ao foco.
+  // Sem esta trava o bootstrap rodava de novo a cada alt-tab, jogando o usuário de
+  // volta pro portfolio e recarregando projetos (setPerfil novo → efeito [logged, perfil]).
+  const bootstrapped = useRef(false);
   const bootstrap = async () => {
+    if (bootstrapped.current) return;
+    bootstrapped.current = true;
     try {
       const p = await api.getPerfil();
       const papel = p?.papel || "cliente";
@@ -1834,7 +1896,7 @@ export default function App() {
     const { data: sub } = supabase.auth.onAuthStateChange((ev, session) => {
       if (ev === "INITIAL_SESSION") return;
       if (ev === "PASSWORD_RECOVERY") { setRecovery(true); setAuthReady(true); return; }
-      if (session) bootstrap(); else { setLogged(false); setPerfil(null); }
+      if (session) bootstrap(); else { bootstrapped.current = false; setLogged(false); setPerfil(null); }
     });
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -1847,6 +1909,7 @@ export default function App() {
   };
   const handleLogout = async () => {
     if (hasSupabase) { try { await api.signOut(); } catch (e) { console.error(e); } }
+    bootstrapped.current = false;
     setLogged(false); setPerfil(null);
   };
 
@@ -1873,26 +1936,34 @@ export default function App() {
 
   const projById = (id) => projetos.find((p) => p.id === id) || PROJ(id);
 
+  // respState guarda os responsáveis de todo o escopo; o vínculo é sempre por projeto.
+  const respIdPorNome = (nome, projId) =>
+    respState.find((r) => r.nome === nome && (r.projId || projId) === projId)?.id || null;
+
   // carrega dados do escopo (1, vários ou todos os projetos)
   const loadScope = async (ids) => {
     if (!ids || ids.length === 0) return;
-    let merged = [];
+    let merged = [], resps = [];
     for (const id of ids) {
-      let acts = null;
-      if (hasSupabase) { try { acts = await api.listAcoes(id); } catch (e) { console.error("acoes:", e.message); } }
-      if (!acts) acts = [];
+      let acts = null, rs = null;
+      if (hasSupabase) {
+        try { acts = await api.listAcoes(id); } catch (e) { console.error("acoes:", e.message); }
+        // responsáveis de TODOS os projetos do escopo, marcados com projId: na Base de
+        // Ações multi-projeto é preciso editar a ação de qualquer um deles sem perder
+        // o vínculo do responsável.
+        try { rs = await api.listResponsaveis(id); } catch (e) { console.error("resp:", e.message); }
+      }
       const proj = projById(id);
-      merged = merged.concat(acts.map((a) => ({ ...a, projId: id, projName: proj?.name })));
+      merged = merged.concat((acts || []).map((a) => ({ ...a, projId: id, projName: proj?.name })));
+      resps = resps.concat((rs || []).map((r) => ({ ...r, projId: id })));
     }
-    setAcoesState(merged);
-    // responsáveis e documentos usam o projeto primário (telas de projeto único)
-    const primary = ids[0];
-    let resp = null, docs = null;
+    setAcoesState(merged); setRespState(resps);
+    // documentos continuam sendo do projeto primário (tela de projeto único)
+    let docs = null;
     if (hasSupabase) {
-      try { resp = await api.listResponsaveis(primary); } catch (e) { console.error("resp:", e.message); }
-      try { docs = await api.listDocumentos(primary); } catch (e) { console.error("docs:", e.message); }
+      try { docs = await api.listDocumentos(ids[0]); } catch (e) { console.error("docs:", e.message); }
     }
-    setRespState(resp || []); setDocState(docs || []);
+    setDocState(docs || []);
   };
 
   useEffect(() => { if (logged) loadScope(scopeIds); /* eslint-disable-next-line */ }, [logged, scopeIds.join(",")]);
@@ -1921,7 +1992,7 @@ export default function App() {
     const codigo = nextCodigo();
     if (hasSupabase) {
       try {
-        const responsavel_id = respState.find((r) => r.nome === form.resp)?.id || null;
+        const responsavel_id = respIdPorNome(form.resp, project.id);
         await api.createAcao(project.id, {
           codigo, descricao: form.descricao, fase: form.fase, origem: form.origem,
           responsavel_id, data_abertura: asISO(form.ab), fecho_planejado: asISO(form.fp), fecho_real: asISO(form.fr), status: form.st,
@@ -1943,7 +2014,9 @@ export default function App() {
   const handleUpdateAcao = async (codigo, form) => {
     if (hasSupabase) {
       try {
-        const responsavel_id = respState.find((r) => r.nome === form.resp)?.id || null;
+        // a ação editada pode ser de outro projeto do escopo (Base de Ações multi)
+        const projId = acoesState.find((a) => a.id === codigo)?.projId || project.id;
+        const responsavel_id = respIdPorNome(form.resp, projId);
         await api.updateAcao(codigo, {
           descricao: form.descricao, fase: form.fase, origem: form.origem, responsavel_id,
           data_abertura: asISO(form.ab), fecho_planejado: asISO(form.fp), fecho_real: asISO(form.fr), status: form.st,
@@ -1960,7 +2033,25 @@ export default function App() {
       try { const r = await api.createResponsavel(project.id, { nome: form.nome, empresa: form.empresa, papel: form.papel, email: form.email, is_pwr }); setRespState((prev) => [...prev, r]); return; }
       catch (e) { falhou("novo responsável", e); return; }
     }
-    setRespState((prev) => [...prev, { nome: form.nome, empresa: form.empresa, pwr: is_pwr, papel: form.papel, email: form.email }]);
+    setRespState((prev) => [...prev, { id: `local-${prev.length + 1}`, projId: project.id, nome: form.nome, empresa: form.empresa, pwr: is_pwr, papel: form.papel, email: form.email }]);
+  };
+  const handleUpdateResponsavel = async (id, form) => {
+    const is_pwr = form.empresa === "PWR Gestão";
+    if (hasSupabase) {
+      try {
+        await api.updateResponsavel(id, { nome: form.nome, empresa: form.empresa, papel: form.papel, email: form.email, is_pwr });
+        await loadScope(scopeIds);
+        return;
+      } catch (e) { falhou("editar responsável", e); return; }
+    }
+    setRespState((prev) => prev.map((r) => r.id === id ? { ...r, nome: form.nome, empresa: form.empresa, pwr: is_pwr, papel: form.papel, email: form.email } : r));
+  };
+  const handleDeleteResponsavel = async (id) => {
+    if (hasSupabase) {
+      try { await api.deleteResponsavel(id); await loadScope(scopeIds); return; }
+      catch (e) { falhou("excluir responsável", e); return; }
+    }
+    setRespState((prev) => prev.filter((r) => r.id !== id));
   };
   const handleCreateDocumento = async (form) => {
     if (hasSupabase) {
@@ -1998,7 +2089,7 @@ export default function App() {
         const enc = ATA_EXAMPLE.encaminhamentos.map((e, i) => ({
           codigo: nextCodigo(i), descricao: e[0], fase: ["Implantação", "Estruturação", "Implantação"][i] || "Implantação",
           origem: "Ata", status: "Aberta", fecho_planejado: toISO(e[2]) || null,
-          responsavel_id: respState.find((r) => r.nome === e[1])?.id || null,
+          responsavel_id: respIdPorNome(e[1], project.id),
         }));
         await api.saveAta(project.id, {
           data: ATA_EXAMPLE.data, local: ATA_EXAMPLE.local,
@@ -2015,6 +2106,7 @@ export default function App() {
   };
 
   const handleCreateUser = async (payload) => { await api.createUserAsAdmin(payload); };
+  const handleUpdateUser = async (perfilId, payload) => { await api.updateUsuario(perfilId, payload); };
   const handleDeleteUser = async (email) => { await api.deleteUsuario(email); };
   const handleSetProjetosUsuario = async (perfilId, projetoIds) => { await api.setProjetosDoPerfil(perfilId, projetoIds); };
   const refreshProjetos = async () => {
@@ -2042,7 +2134,7 @@ export default function App() {
       let ok = 0; let erro = null;
       for (const r of rows) {
         max += 1;
-        const responsavel_id = respState.find((x) => x.nome === r.resp)?.id || null;
+        const responsavel_id = respIdPorNome(r.resp, project.id);
         try {
           await api.createAcao(project.id, {
             codigo: `${prefix}-${max}`, descricao: r.descricao, fase: r.fase || "Diagnóstico",
@@ -2090,10 +2182,10 @@ export default function App() {
       case "kanban": return <Kanban project={project} actions={acoesState} multi={multi} onMove={handleMoveAcao} />;
       case "followup": return <>{nota}<FollowUp project={project} actions={acoesState.filter((a) => !a.projId || a.projId === project?.id)} onSave={handleSaveFollowup} /></>;
       case "ata": return <>{nota}<EmissaoAta project={project} filled={ataFilled} onFill={handleFillAta} /></>;
-      case "responsaveis": return <>{nota}<Responsaveis project={project} projetos={projetos} responsaveis={respState} actions={acoesState.filter((a) => !a.projId || a.projId === project?.id)} onCreate={handleCreateResponsavel} /></>;
+      case "responsaveis": return <>{nota}<Responsaveis project={project} projetos={projetos} responsaveis={respState.filter((r) => !r.projId || r.projId === project?.id)} actions={acoesState.filter((a) => !a.projId || a.projId === project?.id)} onCreate={handleCreateResponsavel} onUpdate={handleUpdateResponsavel} onDelete={handleDeleteResponsavel} /></>;
       case "documentos": return <>{nota}<Documentos project={project} documentos={docState} onCreate={handleCreateDocumento} /></>;
       case "solicitacoes": return <Solicitacoes solicitacoes={solic} projetos={projetos} onCreate={handleCreateSolicitacao} onUpdate={handleUpdateSolicitacao} />;
-      case "administracao": return <Administracao projetos={projetos} onCreateUser={handleCreateUser} onResetSenha={handleResetSenha} onDeleteUser={handleDeleteUser} onUpdateProjeto={handleUpdateProjeto} onDeleteProjeto={handleDeleteProjeto} onSetProjetosUsuario={handleSetProjetosUsuario} />;
+      case "administracao": return <Administracao projetos={projetos} onCreateUser={handleCreateUser} onResetSenha={handleResetSenha} onUpdateUser={handleUpdateUser} onDeleteUser={handleDeleteUser} onUpdateProjeto={handleUpdateProjeto} onDeleteProjeto={handleDeleteProjeto} onSetProjetosUsuario={handleSetProjetosUsuario} />;
       default: return null;
     }
   };
