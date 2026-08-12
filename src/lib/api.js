@@ -29,6 +29,7 @@ export async function listProjetos() {
     id: p.id, name: p.nome, client: p.cliente, city: p.cidade, uf: p.uf,
     region: p.regiao, color: p.cor, letter: p.letra, status: p.status,
     acoes: p.acoes_total, pct: p.percentual, atras: p.atrasadas, emAnd: p.em_andamento,
+    fases: p.fases || [],
     portfolios: (p.projeto_portfolios || []).map((x) => [x.nome, x.percentual]),
   }))
 }
@@ -54,6 +55,15 @@ export async function createAcao(projetoId, payload) {
   if (error) throw error
 }
 
+// Importação grava tudo de uma vez: 146 inserts em sequência davam para parar no
+// meio e deixar meia planilha no banco. Aqui é tudo ou nada.
+export async function createAcoes(projetoId, linhas) {
+  if (!linhas.length) return
+  const { error } = await supabase.from('acoes')
+    .insert(linhas.map((l) => ({ projeto_id: projetoId, ...l })))
+  if (error) throw error
+}
+
 export async function updateAcao(codigo, payload) {
   const { error } = await supabase.from('acoes').update(payload).eq('codigo', codigo)
   if (error) throw error
@@ -61,6 +71,12 @@ export async function updateAcao(codigo, payload) {
 
 export async function deleteAcao(codigo) {
   const { error } = await supabase.from('acoes').delete().eq('codigo', codigo)
+  if (error) throw error
+}
+
+export async function deleteAcoes(codigos) {
+  if (!codigos.length) return
+  const { error } = await supabase.from('acoes').delete().in('codigo', codigos)
   if (error) throw error
 }
 

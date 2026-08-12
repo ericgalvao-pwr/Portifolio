@@ -13,6 +13,7 @@ import { hasSupabase, supabase } from "./lib/supabase";
 import * as api from "./lib/api";
 import brazil from "@svg-maps/brazil";
 import * as XLSX from "xlsx";
+import { parseGSBWorkbook, parseGSBCsv } from "./lib/gsb";
 
 /* ============================ TOKENS DE MARCA ============================ */
 const C = {
@@ -82,7 +83,7 @@ function genActions(p) {
   return arr;
 }
 
-function buildDashboard(actions) {
+function buildDashboard(actions, fases = PHASES) {
   const k = { total: actions.length, Backlog: 0, Finalizada: 0, "Em Andamento": 0, Atrasada: 0, Aberta: 0 };
   actions.forEach((a) => { k[effStatus(a)]++; });
   const pct = k.total ? Math.round((k.Finalizada / k.total) * 100) : 0;
@@ -94,7 +95,7 @@ function buildDashboard(actions) {
   let acc = 0;
   const pareto = paretoRaw.map((x) => { acc += x.n; return { ...x, cum: Math.round((acc / tot) * 100) }; });
 
-  const byPhase = PHASES.map((fase) => {
+  const byPhase = fases.map((fase) => {
     const o = { fase, Backlog: 0, Finalizada: 0, "Em Andamento": 0, Atrasada: 0, Aberta: 0 };
     actions.filter((a) => a.fase === fase).forEach((a) => o[effStatus(a)]++);
     return o;
@@ -122,7 +123,10 @@ function buildDashboard(actions) {
 
   const execByPhase = { "Diagnóstico": 50, "Estruturação": 50, "Implantação": 57, "Estabilização": 50, "Governança": 0 };
   const elapsedByPhase = { "Diagnóstico": 96, "Estruturação": 92, "Implantação": 90, "Estabilização": 86, "Governança": 42 };
-  const heat = PHASES.filter((f) => { const b = byPhase.find((x) => x.fase === f); return b.Finalizada + b.Atrasada + b["Em Andamento"] + b.Aberta > 0; })
+  // execByPhase/elapsedByPhase são mock chaveado pelas 5 fases padrão; projeto com
+  // fases próprias simplesmente não entra no heat em vez de plotar undefined.
+  const heat = fases.filter((f) => elapsedByPhase[f] != null && execByPhase[f] != null)
+    .filter((f) => { const b = byPhase.find((x) => x.fase === f); return b.Finalizada + b.Atrasada + b["Em Andamento"] + b.Aberta > 0; })
     .map((f) => {
       const x = elapsedByPhase[f], y = execByPhase[f];
       const color = y >= x - 3 ? C.green : y >= x - 18 ? C.amber : C.red;
@@ -542,7 +546,7 @@ function Dashboard({ data }) {
   return (
     <div>
       <div className="flex gap-4 mb-4 flex-wrap">
-        {[["FASE", ["Todas", ...PHASES]], ["RESPONSÁVEL", ["Todas"]], ["STATUS", ["Todos"]], ["ORIGEM", ["Todas"]]].map(([lbl, opts]) => (
+        {[["FASE", ["Todas", ...data.byPhase.map((b) => b.fase)]], ["RESPONSÁVEL", ["Todas"]], ["STATUS", ["Todos"]], ["ORIGEM", ["Todas"]]].map(([lbl, opts]) => (
           <div key={lbl}>
             <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>{lbl}</div>
             <select className="border rounded-md px-3 py-1.5 text-sm bg-white" style={{ borderColor: C.border, color: C.navy }}>{opts.map((o) => <option key={o}>{o}</option>)}</select>
@@ -677,7 +681,7 @@ function Gantt({ project }) {
   );
 }
 
-function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelete, onImport, multi }) {
+function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelete, onDeleteMany, onImport, multi }) {
   const [f, setF] = useState({ fase: "Todas", resp: "Todas", st: "Todos", origem: "Todas" });
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -685,21 +689,54 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelet
   const [form, setForm] = useState(vazio);
   const [saving, setSaving] = useState(false);
   const fileRef = useRef();
+  const [preview, setPreview] = useState(null);
+  const [sel, setSel] = useState([]);
+  const [excluindo, setExcluindo] = useState(false);
+  const [confirmar, setConfirmar] = useState(null);
   const resps = [...new Set(actions.map((a) => a.resp).filter(Boolean))];
   const origens = [...new Set(actions.map((a) => a.origem).filter(Boolean))];
+  const origensOpts = [...new Set([...ORIGINS, ...origens])];
+  // no modo multi as ações vêm de projetos com fases diferentes, então o filtro é a
+  // união das fases do projeto atual com as que aparecem nas ações carregadas.
+  const fases = [...new Set([...fasesDo(project), ...actions.map((a) => a.fase).filter(Boolean)])];
   const filtered = actions.filter((a) =>
     (f.fase === "Todas" || a.fase === f.fase) && (f.resp === "Todas" || a.resp === f.resp) &&
     (f.st === "Todos" || effStatus(a) === f.st) && (f.origem === "Todas" || a.origem === f.origem));
+
+  // A seleção só vale para o que está visível: se o filtro mudar depois de marcar,
+  // o que sumiu da tela não é excluído junto.
+  const selecionadas = filtered.filter((a) => a.id && sel.includes(a.id));
+  const todasMarcadas = selecionadas.length > 0 && selecionadas.length === filtered.filter((a) => a.id).length;
+  const marcar = (id, on) => setSel((prev) => (on ? [...prev, id] : prev.filter((x) => x !== id)));
+  const marcarTodas = (on) => setSel(on ? filtered.map((a) => a.id).filter(Boolean) : []);
+  // confirmar = { titulo, texto, acao } — o dialog é o mesmo para uma ação ou várias
+  const pedirExclusaoSelecionadas = () => {
+    const ids = selecionadas.map((a) => a.id);
+    setConfirmar({
+      titulo: `Excluir ${ids.length} ${ids.length === 1 ? "ação" : "ações"}`,
+      texto: `${ids.length} ${ids.length === 1 ? "ação será excluída" : "ações serão excluídas"} deste projeto.`,
+      acao: async () => { await onDeleteMany(ids); setSel([]); },
+    });
+  };
+  const pedirExclusao = (a) => setConfirmar({
+    titulo: `Excluir ${a.id}`,
+    texto: `A ação "${a.acao}" será excluída.`,
+    acao: () => onDelete(a.id),
+  });
+  const confirmarExclusao = async () => {
+    setExcluindo(true);
+    try { await confirmar.acao(); } finally { setExcluindo(false); setConfirmar(null); }
+  };
 
   // no modo multi a ação editada pode ser de outro projeto — o select de responsável
   // tem que seguir o projeto dela, não o primário do escopo.
   const projDaAcao = editing?.projId || project.id;
   const respsDoProjeto = responsaveis.filter((r) => (r.projId || project.id) === projDaAcao);
 
-  const abrirNova = () => { setEditing(null); setForm(vazio); setModal(true); };
+  const abrirNova = () => { setEditing(null); setForm({ ...vazio, fase: fases[0] || "" }); setModal(true); };
   const abrirEdicao = (a) => {
     setEditing(a);
-    setForm({ descricao: a.acao, fase: a.fase || "Diagnóstico", origem: a.origem || "Ata", resp: a.resp || "", ab: asISO(a.ab) || "", fp: asISO(a.fp) || "", fr: asISO(a.fr) || "", st: a.st || "Aberta" });
+    setForm({ descricao: a.acao, fase: a.fase || "", origem: a.origem || "", resp: a.resp || "", ab: asISO(a.ab) || "", fp: asISO(a.fp) || "", fr: asISO(a.fr) || "", st: a.st || "Aberta" });
     setModal(true);
   };
 
@@ -718,24 +755,20 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelet
     if (!file) return;
     const nome = file.name.toLowerCase();
     const reader = new FileReader();
-    const processar = (rows) => {
-      if (!rows.length) { alert("Nenhuma linha reconhecida no arquivo."); return; }
-      // com vários projetos no escopo o destino não é óbvio — confirma antes de
-      // despejar a planilha inteira no projeto errado.
-      if (multi && !window.confirm(`Importar ${rows.length} ${rows.length === 1 ? "ação" : "ações"} para o projeto "${project.name}"?`)) return;
-      onImport(rows);
+    // só abre a preview — a gravação só acontece quando o usuário confirmar lá.
+    const processar = (dados) => {
+      if (!dados.rows.length) { alert("Nenhuma linha reconhecida no arquivo."); return; }
+      setPreview(dados);
     };
     if (nome.endsWith(".xlsx") || nome.endsWith(".xls")) {
       reader.onload = () => {
         try {
-          const wb = XLSX.read(new Uint8Array(reader.result), { type: "array" });
-          const sheet = wb.Sheets[wb.SheetNames[0]];
-          processar(parseAcoesCSV(XLSX.utils.sheet_to_csv(sheet)));
+          processar(parseGSBWorkbook(XLSX.read(new Uint8Array(reader.result), { type: "array" })));
         } catch (err) { console.error(err); alert("Não foi possível ler o arquivo Excel."); }
       };
       reader.readAsArrayBuffer(file);
     } else {
-      reader.onload = () => processar(parseAcoesCSV(String(reader.result)));
+      reader.onload = () => processar(parseGSBCsv(String(reader.result)));
       reader.readAsText(file);
     }
     e.target.value = "";
@@ -768,22 +801,42 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelet
           </div>
         } />
       <div className="flex gap-3 items-end mb-4 flex-wrap">
-        <Sel k="fase" label="FASE" opts={["Todas", ...PHASES]} />
+        <Sel k="fase" label="FASE" opts={["Todas", ...fases]} />
         <Sel k="resp" label="RESPONSÁVEL" opts={["Todas", ...resps]} />
         <Sel k="st" label="STATUS" opts={["Todos", ...Object.keys(STATUS)]} />
         <Sel k="origem" label="ORIGEM" opts={["Todas", ...origens]} />
         <button onClick={() => setF({ fase: "Todas", resp: "Todas", st: "Todos", origem: "Todas" })} className="border rounded-md px-3 py-1.5 text-sm" style={{ borderColor: C.border, color: C.navyMed }}>Limpar</button>
       </div>
+      {selecionadas.length > 0 && (
+        <div className="flex items-center gap-3 mb-3 rounded-md px-3 py-2" style={{ background: "#fff4ed" }}>
+          <span className="text-sm font-semibold" style={{ color: C.navy }}>
+            {selecionadas.length} {selecionadas.length === 1 ? "ação selecionada" : "ações selecionadas"}
+          </span>
+          <button onClick={pedirExclusaoSelecionadas} disabled={excluindo}
+            className="border rounded-md px-3 py-1.5 text-sm font-semibold disabled:opacity-60" style={{ borderColor: C.red, color: C.red }}>
+            Excluir selecionadas
+          </button>
+          <button onClick={() => setSel([])} className="text-sm font-semibold" style={{ color: C.navyMed }}>Limpar seleção</button>
+        </div>
+      )}
       <div className="bg-white rounded-lg border overflow-x-auto" style={{ borderColor: C.border }}>
         <table className="w-full text-sm">
           <thead>
             <tr className="text-[11px] font-semibold text-left" style={{ color: C.gray }}>
+              <th className="px-4 py-3">
+                <input type="checkbox" checked={todasMarcadas} onChange={(e) => marcarTodas(e.target.checked)}
+                  title="Selecionar todas as ações visíveis" />
+              </th>
               {[...(multi ? ["PROJETO"] : []), "ID", "AÇÃO", "FASE", "ORIGEM", "RESPONSÁVEL", "ABERTURA", "FECH. PLAN.", "FECH. REAL", "STATUS", ""].map((h, i) => <th key={h || `x${i}`} className="px-4 py-3">{h}</th>)}
             </tr>
           </thead>
           <tbody>
             {filtered.map((a, i) => (
               <tr key={a.id || i} className="border-t" style={{ borderColor: C.border }}>
+                <td className="px-4 py-3">
+                  <input type="checkbox" disabled={!a.id} checked={!!a.id && sel.includes(a.id)}
+                    onChange={(e) => marcar(a.id, e.target.checked)} />
+                </td>
                 {multi && <td className="px-4 py-3 font-semibold" style={{ color: C.navyMed }}>{a.projName || "—"}</td>}
                 <td className="px-4 py-3 font-semibold" style={{ color: C.blue }}>{a.id || "—"}</td>
                 <td className="px-4 py-3 font-semibold" style={{ color: C.navy }}>{a.acao || "—"}</td>
@@ -796,7 +849,7 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelet
                 <td className="px-4 py-3"><StatusBadge st={effStatus(a)} /></td>
                 <td className="px-4 py-3"><div className="flex gap-2">
                   <button onClick={() => abrirEdicao(a)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.navy }}>Editar</button>
-                  <button onClick={() => { if (window.confirm(`Excluir a ação "${a.acao}"? Esta ação não pode ser desfeita.`)) onDelete(a.id); }} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.red }}>Excluir</button>
+                  <button onClick={() => pedirExclusao(a)} className="border rounded px-2.5 py-1 text-xs font-semibold" style={{ borderColor: C.border, color: C.red }}>Excluir</button>
                 </div></td>
               </tr>
             ))}
@@ -809,9 +862,16 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelet
             <input value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Descreva a ação" className={inp} style={{ borderColor: C.border }} /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>FASE</div>
-              <select value={form.fase} onChange={(e) => setForm({ ...form, fase: e.target.value })} className={`${inp} bg-white`} style={{ borderColor: C.border }}>{PHASES.map((o) => <option key={o}>{o}</option>)}</select></div>
+              <select value={form.fase} onChange={(e) => setForm({ ...form, fase: e.target.value })} className={`${inp} bg-white`} style={{ borderColor: C.border }}>
+                {/* vazio é opção real: a planilha GSB traz ações sem fase */}
+                <option value="">— sem fase —</option>{fases.map((o) => <option key={o}>{o}</option>)}
+              </select></div>
             <div><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>ORIGEM</div>
-              <select value={form.origem} onChange={(e) => setForm({ ...form, origem: e.target.value })} className={`${inp} bg-white`} style={{ borderColor: C.border }}>{ORIGINS.map((o) => <option key={o}>{o}</option>)}</select></div>
+              <select value={form.origem} onChange={(e) => setForm({ ...form, origem: e.target.value })} className={`${inp} bg-white`} style={{ borderColor: C.border }}>
+                {/* união com as origens já usadas: a planilha traz "Agenda", "PE", "RMR".
+                    Sem isso o select exibia a primeira opção ao editar uma ação importada. */}
+                <option value="">— sem origem —</option>{origensOpts.map((o) => <option key={o}>{o}</option>)}
+              </select></div>
           </div>
           <div className="mt-3"><div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>RESPONSÁVEL</div>
             <select value={form.resp} onChange={(e) => setForm({ ...form, resp: e.target.value })} className={`${inp} bg-white`} style={{ borderColor: C.border }}>
@@ -830,6 +890,26 @@ function BaseAcoes({ project, actions, responsaveis, onCreate, onUpdate, onDelet
             <button onClick={() => { setModal(false); setEditing(null); }} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
           </div>
         </Modal>
+      )}
+      {confirmar && (
+        <ConfirmDialog
+          titulo={confirmar.titulo}
+          texto={confirmar.texto}
+          ocupado={excluindo}
+          onConfirm={confirmarExclusao}
+          onCancel={() => setConfirmar(null)}
+        />
+      )}
+      {preview && (
+        <ImportPreview
+          dados={preview}
+          project={project}
+          // duplicata é comparada só contra as ações do projeto de destino
+          acoesDoProjeto={multi ? actions.filter((a) => (a.projId || project.id) === project.id) : actions}
+          responsaveis={responsaveis.filter((r) => (r.projId || project.id) === project.id)}
+          onCancel={() => setPreview(null)}
+          onConfirm={async (linhas, fasesDaPlanilha) => { await onImport(linhas, fasesDaPlanilha); setPreview(null); }}
+        />
       )}
     </div>
   );
@@ -1325,16 +1405,17 @@ function Administracao({ projetos, onCreateUser, onResetSenha, onUpdateUser, onD
   const [savingUser, setSavingUser] = useState(false);
   const [userMsg, setUserMsg] = useState(null);
   const [editProj, setEditProj] = useState(null);
-  const [pf, setPf] = useState({ nome: "", cliente: "", regiao: "Nordeste", uf: "CE", status: "Ativo" });
+  const [pf, setPf] = useState({ nome: "", cliente: "", regiao: "Nordeste", uf: "CE", status: "Ativo", fases: "" });
   const [savingProj, setSavingProj] = useState(false);
   const [projMsg, setProjMsg] = useState(null);
   const papelLabel = { admin: "Admin", consultor: "Consultor", cliente: "Cliente" };
 
-  const abrirEdicaoProj = (p) => { setEditProj(p); setPf({ nome: p.name, cliente: p.client, regiao: p.region, uf: p.uf, status: p.status }); setProjMsg(null); };
+  const abrirEdicaoProj = (p) => { setEditProj(p); setPf({ nome: p.name, cliente: p.client, regiao: p.region, uf: p.uf, status: p.status, fases: fasesDo(p).join("\n") }); setProjMsg(null); };
   const salvarProj = async () => {
     setSavingProj(true); setProjMsg(null);
     try {
-      await onUpdateProjeto(editProj.id, { nome: pf.nome, cliente: pf.cliente, regiao: pf.regiao, uf: pf.uf, status: pf.status });
+      const fases = pf.fases.split("\n").map((s) => s.trim()).filter(Boolean);
+      await onUpdateProjeto(editProj.id, { nome: pf.nome, cliente: pf.cliente, regiao: pf.regiao, uf: pf.uf, status: pf.status, fases });
       setEditProj(null);
     } catch (e) { setProjMsg({ tipo: "erro", texto: e.message || "Falha ao salvar." }); }
     finally { setSavingProj(false); }
@@ -1521,6 +1602,14 @@ function Administracao({ projetos, onCreateUser, onResetSenha, onUpdateUser, onD
             <select value={pf.status} onChange={(e) => setPf({ ...pf, status: e.target.value })} className="border rounded-md px-3 py-2 text-sm w-full bg-white" style={{ borderColor: C.border, color: C.navy }}>
               <option>Ativo</option><option>Não iniciado</option>
             </select></div>
+          <div className="mt-3">
+            <div className="text-[10px] font-semibold mb-1" style={{ color: C.gray }}>FASES DO PROJETO (uma por linha)</div>
+            <textarea value={pf.fases} onChange={(e) => setPf({ ...pf, fases: e.target.value })} rows={5}
+              className="border rounded-md px-3 py-2 text-sm w-full font-mono text-[12px]" style={{ borderColor: C.border }} />
+            <div className="text-[11px] mt-1" style={{ color: C.gray }}>
+              A ordem aqui é a ordem do gráfico por fase. Deixe em branco para usar a metodologia padrão da PWR.
+            </div>
+          </div>
           {projMsg && <div className="text-sm mt-3 rounded-md px-3 py-2" style={{ background: "#fee2e2", color: C.red }}>{projMsg.texto}</div>}
           <div className="flex gap-2 mt-4 items-center">
             <button onClick={salvarProj} disabled={savingProj} className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>{savingProj ? "Salvando…" : "Salvar"}</button>
@@ -1574,10 +1663,10 @@ function Administracao({ projetos, onCreateUser, onResetSenha, onUpdateUser, onD
 }
 
 /* ============================ MODAIS ============================ */
-function Modal({ title, children, onClose }) {
+function Modal({ title, children, onClose, wide }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "#05244f66" }}>
-      <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div className={`bg-white rounded-xl p-6 w-full ${wide ? "max-w-4xl" : "max-w-md"} shadow-2xl max-h-[90vh] overflow-y-auto`}>
         <div className="flex items-center justify-between mb-4">
           <div className="font-extrabold text-lg" style={{ color: C.navy }}>{title}</div>
           <button onClick={onClose} className="w-7 h-7 rounded-md border flex items-center justify-center" style={{ borderColor: C.border }}><X size={14} color={C.gray} /></button>
@@ -1585,6 +1674,135 @@ function Modal({ title, children, onClose }) {
         {children}
       </div>
     </div>
+  );
+}
+// Confirmação de ação destrutiva. Substitui window.confirm, que não dá para estilizar
+// nem mostrar estado de "excluindo…".
+function ConfirmDialog({ titulo, texto, rotulo = "Excluir", ocupado, onConfirm, onCancel }) {
+  return (
+    <Modal title={titulo} onClose={ocupado ? () => {} : onCancel}>
+      <p className="text-sm" style={{ color: C.navyMed }}>{texto}</p>
+      <p className="text-[12px] mt-2" style={{ color: C.gray }}>Esta ação não pode ser desfeita.</p>
+      <div className="flex gap-2 mt-4">
+        <button onClick={onConfirm} disabled={ocupado}
+          className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.red }}>
+          {ocupado ? "Excluindo…" : rotulo}
+        </button>
+        <button onClick={onCancel} disabled={ocupado} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
+      </div>
+    </Modal>
+  );
+}
+// Preview da importação: mostra o que será gravado antes de gravar. Nada vai para o
+// banco enquanto o usuário não confirmar aqui.
+function ImportPreview({ dados, project, acoesDoProjeto, responsaveis, onCancel, onConfirm }) {
+  const [incluirDup, setIncluirDup] = useState(false);
+  const [adotarFases, setAdotarFases] = useState(true);
+  const [salvando, setSalvando] = useState(false);
+
+  const info = useMemo(() => {
+    const chave = (s) => String(s || "").trim().toLowerCase();
+    const existentes = new Set(acoesDoProjeto.map((a) => chave(a.acao)));
+    const linhas = dados.rows.map((r) => ({ ...r, dup: existentes.has(chave(r.descricao)) }));
+    const nomes = new Set(responsaveis.map((r) => r.nome));
+    const fasesAtuais = fasesDo(project);
+    return {
+      linhas,
+      dup: linhas.filter((l) => l.dup).length,
+      respsFaltando: [...new Set(linhas.map((l) => l.resp).filter((n) => n && !nomes.has(n)))],
+      semFase: linhas.filter((l) => !l.fase).length,
+      semPrazo: linhas.filter((l) => !l.fp).length,
+      fasesNovas: dados.fases.filter((f) => !fasesAtuais.includes(f)),
+    };
+  }, [dados, acoesDoProjeto, responsaveis, project]);
+
+  const aImportar = incluirDup ? info.linhas : info.linhas.filter((l) => !l.dup);
+  const confirmar = async () => {
+    setSalvando(true);
+    await onConfirm(aImportar, adotarFases && info.fasesNovas.length > 0 ? dados.fases : null);
+    setSalvando(false);
+  };
+
+  const Aviso2 = ({ children }) => (
+    <div className="text-[12px] rounded-md px-3 py-2 mb-2" style={{ background: "#fff4ed", color: C.navyMed }}>{children}</div>
+  );
+
+  return (
+    <Modal wide title={`Importar para ${project.name}`} onClose={onCancel}>
+      <div className="flex gap-3 mb-4 flex-wrap">
+        <StatCard value={info.linhas.length} label="LINHAS LIDAS" accent={C.blue} />
+        <StatCard value={aImportar.length} label="SERÃO IMPORTADAS" accent={C.orange} />
+        <StatCard value={info.dup} label="JÁ EXISTEM" accent={C.gray} />
+      </div>
+
+      {info.respsFaltando.length > 0 && (
+        <Aviso2>
+          <b>{info.respsFaltando.length} responsáveis não cadastrados neste projeto:</b>{" "}
+          {info.respsFaltando.join(", ")}. Essas ações entram sem responsável.
+          {" "}<b>Reimportar depois não resolve</b> — a importação só cria ações novas, nunca
+          atualiza as que já existem. Para vincular, cancele agora, cadastre em Responsáveis
+          e importe uma vez só.
+        </Aviso2>
+      )}
+      {info.semFase > 0 && <Aviso2>{info.semFase} ações sem fase na planilha. Entram sem fase e ficam fora do gráfico por fase até serem classificadas.</Aviso2>}
+      {info.semPrazo > 0 && <Aviso2>{info.semPrazo} ações sem data prevista de conclusão. Sem prazo não há cálculo de atraso.</Aviso2>}
+      {info.fasesNovas.length > 0 && (
+        <Aviso2>
+          A planilha traz {info.fasesNovas.length} fases que este projeto ainda não tem.
+          <label className="flex items-center gap-2 mt-1.5 font-semibold cursor-pointer">
+            <input type="checkbox" checked={adotarFases} onChange={(e) => setAdotarFases(e.target.checked)} />
+            Usar as fases da planilha neste projeto
+          </label>
+        </Aviso2>
+      )}
+
+      {info.dup > 0 && (
+        <label className="flex items-center gap-2 text-[12px] mb-3 cursor-pointer" style={{ color: C.navyMed }}>
+          <input type="checkbox" checked={incluirDup} onChange={(e) => setIncluirDup(e.target.checked)} />
+          Importar também as {info.dup} ações que já existem (cria duplicadas)
+        </label>
+      )}
+
+      <div className="border rounded-lg overflow-auto max-h-[45vh]" style={{ borderColor: C.border }}>
+        <table className="w-full text-[12px]">
+          <thead className="sticky top-0 bg-white">
+            <tr className="text-[10px] font-semibold text-left" style={{ color: C.gray }}>
+              {["AÇÃO", "FASE", "ORIGEM", "RESPONSÁVEL", "INÍCIO", "PREVISTO", "REAL", "STATUS"].map((h) => (
+                <th key={h} className="px-3 py-2 border-b" style={{ borderColor: C.border }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {info.linhas.map((l, i) => {
+              const fora = l.dup && !incluirDup;
+              return (
+                <tr key={i} className="border-t" style={{ borderColor: C.border, opacity: fora ? 0.4 : 1 }}>
+                  <td className="px-3 py-1.5 font-semibold" style={{ color: C.navy }}>
+                    {l.descricao}
+                    {l.dup && <span className="ml-1.5 text-[10px] font-bold" style={{ color: C.gray }}>JÁ EXISTE</span>}
+                  </td>
+                  <td className="px-3 py-1.5" style={{ color: C.gray }}>{l.fase || "—"}</td>
+                  <td className="px-3 py-1.5" style={{ color: C.gray }}>{l.origem || "—"}</td>
+                  <td className="px-3 py-1.5" style={{ color: C.navyMed }}>{l.resp || "—"}</td>
+                  <td className="px-3 py-1.5" style={{ color: C.gray }}>{api.fmt(l.ab)}</td>
+                  <td className="px-3 py-1.5" style={{ color: C.gray }}>{api.fmt(l.fp)}</td>
+                  <td className="px-3 py-1.5" style={{ color: C.gray }}>{api.fmt(l.fr)}</td>
+                  <td className="px-3 py-1.5"><StatusBadge st={l.st} /></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex gap-2 mt-4 items-center">
+        <button onClick={confirmar} disabled={salvando || !aImportar.length}
+          className="rounded-md px-4 py-2 text-sm font-bold text-white disabled:opacity-60" style={{ background: C.orange }}>
+          {salvando ? "Importando…" : `Importar ${aImportar.length} ${aImportar.length === 1 ? "ação" : "ações"}`}
+        </button>
+        <button onClick={onCancel} disabled={salvando} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ color: C.navy }}>Cancelar</button>
+      </div>
+    </Modal>
   );
 }
 // Aviso fixo no rodapé — usado para falhas de gravação, que antes só iam ao console.
@@ -1790,35 +2008,8 @@ const effStatus = (a) => {
   return a.st;
 };
 const csvCell = (v) => { const s = String(v ?? ""); return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-function parseAcoesCSV(text) {
-  const lines = text.replace(/\r/g, "").split("\n").filter((l) => l.trim());
-  if (!lines.length) return [];
-  const delim = (lines[0].match(/;/g) || []).length >= (lines[0].match(/,/g) || []).length ? ";" : ",";
-  const parseLine = (line) => {
-    const out = []; let cur = "", q = false;
-    for (let i = 0; i < line.length; i++) {
-      const c = line[i];
-      if (c === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; }
-      else if (c === delim && !q) { out.push(cur); cur = ""; }
-      else cur += c;
-    }
-    out.push(cur); return out.map((s) => s.trim());
-  };
-  const norm = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-  const header = parseLine(lines[0]).map(norm);
-  const idx = (names) => { for (const n of names) { const i = header.indexOf(n); if (i >= 0) return i; } return -1; };
-  const iAcao = idx(["acao", "descricao", "acao/descricao"]), iFase = idx(["fase"]), iOrigem = idx(["origem"]),
-    iResp = idx(["responsavel", "resp"]), iAb = idx(["abertura", "data abertura", "data_abertura"]),
-    iFp = idx(["fech. plan.", "fecho planejado", "fecho_planejado", "prazo", "fech plan"]), iSt = idx(["status"]);
-  const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const c = parseLine(lines[i]);
-    const descricao = iAcao >= 0 ? c[iAcao] : c[0];
-    if (!descricao) continue;
-    rows.push({ descricao, fase: iFase >= 0 ? c[iFase] : "", origem: iOrigem >= 0 ? c[iOrigem] : "", resp: iResp >= 0 ? c[iResp] : "", ab: iAb >= 0 ? c[iAb] : "", fp: iFp >= 0 ? c[iFp] : "", st: iSt >= 0 ? c[iSt] : "" });
-  }
-  return rows;
-}
+// Fases do cliente; quem n\u00e3o tem as suas usa a metodologia padr\u00e3o da PWR.
+const fasesDo = (proj) => (proj?.fases?.length ? proj.fases : PHASES);
 
 /* ============================ APP ============================ */
 export default function App() {
@@ -2011,6 +2202,15 @@ export default function App() {
     }
     setAcoesState((prev) => prev.filter((a) => a.id !== codigo));
   };
+  const handleDeleteAcoes = async (codigos) => {
+    if (hasSupabase) {
+      try { await api.deleteAcoes(codigos); await loadScope(scopeIds); }
+      catch (e) { falhou("excluir ações", e); return; }
+    } else {
+      setAcoesState((prev) => prev.filter((a) => !codigos.includes(a.id)));
+    }
+    setAviso({ tipo: "ok", texto: `${codigos.length} ${codigos.length === 1 ? "ação excluída" : "ações excluídas"}.` });
+  };
   const handleUpdateAcao = async (codigo, form) => {
     if (hasSupabase) {
       try {
@@ -2113,7 +2313,9 @@ export default function App() {
     if (!hasSupabase) return;
     const todos = await api.listProjetos();
     const ps = perfil?.papel === "consultor" ? todos.filter((p) => (perfil.projetoIds || []).includes(p.id)) : todos;
-    if (ps.length) { setProjetos(ps); setScopeIds((cur) => cur.filter((id) => ps.some((p) => p.id === id)).length ? cur : [ps[0].id]); }
+    // o projeto aberto é uma cópia em estado à parte: sem isto, alteração de fases
+    // (ou de nome) só apareceria depois de trocar de projeto e voltar.
+    if (ps.length) { setProjetos(ps); setProject((cur) => ps.find((p) => p.id === cur?.id) || cur); setScopeIds((cur) => cur.filter((id) => ps.some((p) => p.id === id)).length ? cur : [ps[0].id]); }
   };
   const handleUpdateProjeto = async (id, payload) => { await api.updateProjeto(id, payload); await refreshProjetos(); };
   const handleDeleteProjeto = async (id) => { await api.deleteProjeto(id); await refreshProjetos(); };
@@ -2127,34 +2329,40 @@ export default function App() {
     }
     setAcoesState((prev) => prev.map((a) => a.id === action.id ? { ...a, st: novoStatus, ...(payload.fecho_real ? { fr: payload.fecho_real } : {}) } : a));
   };
-  const handleImportAcoes = async (rows) => {
+  // rows já vêm filtradas pela preview; fasesDaPlanilha só vem preenchida quando o
+  // usuário marcou para adotar as fases do arquivo neste projeto.
+  const handleImportAcoes = async (rows, fasesDaPlanilha) => {
     const prefix = project.id.slice(0, 3).toUpperCase();
-    let max = acoesState.reduce((m, a) => Math.max(m, numFrom(a.id)), 0);
+    const max = acoesState.reduce((m, a) => Math.max(m, numFrom(a.id)), 0);
+    const total = rows.length;
     if (hasSupabase) {
-      let ok = 0; let erro = null;
-      for (const r of rows) {
-        max += 1;
-        const responsavel_id = respIdPorNome(r.resp, project.id);
-        try {
-          await api.createAcao(project.id, {
-            codigo: `${prefix}-${max}`, descricao: r.descricao, fase: r.fase || "Diagnóstico",
-            origem: r.origem || "Ata", responsavel_id, data_abertura: asISO(r.ab), fecho_planejado: asISO(r.fp), status: r.st || "Aberta",
-          });
-          ok += 1;
-        } catch (e) { console.error("import:", e.message); erro = e; }
-      }
+      try {
+        // um insert só: o laço anterior podia parar no meio e deixar meia planilha gravada
+        await api.createAcoes(project.id, rows.map((r, i) => ({
+          codigo: `${prefix}-${max + 1 + i}`, descricao: r.descricao, fase: r.fase || null,
+          origem: r.origem || null, responsavel_id: respIdPorNome(r.resp, project.id),
+          data_abertura: r.ab, fecho_planejado: r.fp, fecho_real: r.fr, status: r.st || "Aberta",
+        })));
+        if (fasesDaPlanilha) await api.updateProjeto(project.id, { fases: fasesDaPlanilha });
+      } catch (e) { falhou("importar planilha", e); return; }
+      if (fasesDaPlanilha) await refreshProjetos();
       await loadScope(scopeIds);
-      // importa o que for possível e informa o resultado real
-      if (ok === rows.length) setAviso({ tipo: "ok", texto: `${ok} ${ok === 1 ? "ação importada" : "ações importadas"} com sucesso.` });
-      else if (ok === 0) falhou("importar planilha", erro);
-      else setAviso({ tipo: "erro", texto: `Apenas ${ok} de ${rows.length} ações foram importadas. As demais falharam.` });
+      setAviso({ tipo: "ok", texto: `${total} ${total === 1 ? "ação importada" : "ações importadas"} com sucesso.` });
     } else {
-      setAcoesState((prev) => [...prev, ...rows.map((r, i) => ({ id: `${prefix}-${max + 1 + i}`, acao: r.descricao, fase: r.fase, origem: r.origem, resp: r.resp, ab: r.ab || "–", fp: r.fp || "–", fr: "–", st: r.st || "Aberta" }))]);
+      setAcoesState((prev) => [...prev, ...rows.map((r, i) => ({
+        id: `${prefix}-${max + 1 + i}`, acao: r.descricao, fase: r.fase, origem: r.origem,
+        resp: r.resp, ab: api.fmt(r.ab), fp: api.fmt(r.fp), fr: api.fmt(r.fr), st: r.st || "Aberta",
+      }))]);
+      if (fasesDaPlanilha) {
+        setProjetos((prev) => prev.map((p) => p.id === project.id ? { ...p, fases: fasesDaPlanilha } : p));
+        setProject((cur) => ({ ...cur, fases: fasesDaPlanilha }));
+      }
+      setAviso({ tipo: "ok", texto: `${total} ${total === 1 ? "ação importada" : "ações importadas"} com sucesso.` });
     }
   };
   const handleResetSenha = async ({ email, novaSenha }) => { await api.resetSenhaUsuario(email, novaSenha); };
 
-  const dashData = useMemo(() => buildDashboard(acoesState), [acoesState]);
+  const dashData = useMemo(() => buildDashboard(acoesState, fasesDo(project)), [acoesState, project]);
 
   if (hasSupabase && recovery) return <ResetPassword onDone={async (pw) => { await api.updatePassword(pw); setRecovery(false); if (window.history.replaceState) window.history.replaceState(null, "", window.location.pathname); bootstrap(); }} />;
   if (hasSupabase && !authReady) return (
@@ -2178,7 +2386,7 @@ export default function App() {
       case "mapa": return <MapaBrasil projetos={projetos} openProject={openProject} />;
       case "dashboard": return <Dashboard data={dashData} />;
       case "gantt": return <>{nota}<Gantt project={project} /></>;
-      case "acoes": return <BaseAcoes project={project} actions={acoesState} responsaveis={respState} onCreate={handleCreateAcao} onUpdate={handleUpdateAcao} onDelete={handleDeleteAcao} onImport={handleImportAcoes} multi={multi} />;
+      case "acoes": return <BaseAcoes project={project} actions={acoesState} responsaveis={respState} onCreate={handleCreateAcao} onUpdate={handleUpdateAcao} onDelete={handleDeleteAcao} onDeleteMany={handleDeleteAcoes} onImport={handleImportAcoes} multi={multi} />;
       case "kanban": return <Kanban project={project} actions={acoesState} multi={multi} onMove={handleMoveAcao} />;
       case "followup": return <>{nota}<FollowUp project={project} actions={acoesState.filter((a) => !a.projId || a.projId === project?.id)} onSave={handleSaveFollowup} /></>;
       case "ata": return <>{nota}<EmissaoAta project={project} filled={ataFilled} onFill={handleFillAta} /></>;
