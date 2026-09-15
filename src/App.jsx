@@ -136,15 +136,6 @@ function buildDashboard(actions, fases = PHASES) {
   return { kpis: { total: k.total, fin: k.Finalizada, emAnd: k["Em Andamento"], atras: k.Atrasada, aberta: k.Aberta, backlog: k.Backlog, pct }, pareto, byPhase, byResp, heat, alerts: { vencidas, aVencer } };
 }
 
-const GANTT = [
-  { fase: "Diagnóstico", ini: "01/04/25", fim: "12/07/25", pct: 50 },
-  { fase: "Estruturação", ini: "16/07/25", fim: "26/10/25", pct: 50 },
-  { fase: "Implantação", ini: "30/10/25", fim: "10/02/26", pct: 57 },
-  { fase: "Estabilização", ini: "14/02/26", fim: "27/05/26", pct: 50 },
-  { fase: "Governança", ini: "31/05/26", fim: "11/09/26", pct: 0 },
-];
-const parseD = (s) => { const [d, m, y] = s.split("/").map(Number); return new Date(2000 + y, m - 1, d); };
-
 const KANBAN = {
   Aberta: [
     ["Padronizar procedimento operacional", "gosto", "Gosto Mineiro Laticínios", "Marina Lopes", "Ata", "09/07/25"],
@@ -640,42 +631,97 @@ function Dashboard({ data }) {
   );
 }
 
-function Gantt({ project }) {
-  const min = parseD(GANTT[0].ini).getTime();
-  const max = parseD(GANTT[GANTT.length - 1].fim).getTime();
-  const range = max - min;
-  const today = new Date(2026, 6, 17).getTime();
-  const todayPct = ((today - min) / range) * 100;
+function Gantt({ project, actions }) {
+  // toda fase do projeto vira uma linha, mesmo sem ação. % = finalizadas/total da
+  // fase, período = min/max das datas (ab/fp/fr) das ações. Fase sem ação ou sem
+  // nenhuma data preenchida aparece sem barra, em vez de sumir sem explicação.
+  const fases = fasesDo(project).map((fase) => {
+    const grupo = actions.filter((a) => a.fase === fase);
+    if (!grupo.length) return { fase, temAcoes: false, pct: null, ini: null, fim: null };
+    const pct = Math.round((grupo.filter((a) => effStatus(a) === "Finalizada").length / grupo.length) * 100);
+    const datas = grupo.flatMap((a) => [a.ab, a.fp, a.fr]).map(asISO).filter(Boolean).map((iso) => new Date(iso));
+    if (!datas.length) return { fase, temAcoes: true, pct, ini: null, fim: null };
+    return { fase, temAcoes: true, pct, ini: new Date(Math.min(...datas)), fim: new Date(Math.max(...datas)) };
+  });
+
+  const comData = fases.filter((f) => f.ini);
+  const min = comData.length ? Math.min(...comData.map((f) => f.ini.getTime())) : null;
+  const max = comData.length ? Math.max(...comData.map((f) => f.fim.getTime())) : null;
+  const range = min != null ? (max - min || 1) : null;
+  const todayPct = range ? Math.min(100, Math.max(0, ((Date.now() - min) / range) * 100)) : null;
+  const fmtBR = (d) => d.toLocaleDateString("pt-BR");
+  const offset = (pct) => `calc(160px + (100% - 160px) * ${pct / 100})`;
+  const pctOf = (t) => Math.min(100, Math.max(0, ((t - min) / range) * 100));
+
+  // eixo por mês: uma marca no 1º dia de cada mês do período, com o ano só onde muda.
+  const meses = [];
+  if (range) {
+    let d = new Date(min); d.setDate(1); d.setHours(0, 0, 0, 0);
+    let anoAnterior = null;
+    while (d.getTime() <= max) {
+      const ano = d.getFullYear();
+      meses.push({ pct: pctOf(d.getTime()), mes: d.toLocaleDateString("pt-BR", { month: "short" }), ano, showAno: ano !== anoAnterior });
+      anoAnterior = ano;
+      d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    }
+  }
+
   return (
     <div>
-      <PageHeader title={`Fases & Gantt — ${project.name}`} subtitle="Barras coloridas pela saúde da fase · linha laranja = hoje" />
+      <PageHeader title={`Fases & Gantt — ${project.name}`} subtitle="Barras coloridas pela saúde da fase · linha laranja = hoje · passe o mouse na barra pra ver as datas" />
       <div className="bg-white rounded-lg border p-6 relative" style={{ borderColor: C.border }}>
+        {!actions.length ? (
+          <div className="text-sm text-center py-6" style={{ color: C.gray }}>Nenhuma ação cadastrada neste projeto ainda.</div>
+        ) : (
         <div className="relative">
-          {GANTT.map((g) => {
-            const s = parseD(g.ini).getTime(), e = parseD(g.fim).getTime();
-            const left = ((s - min) / range) * 100;
-            const width = ((e - s) / range) * 100;
-            return (
-              <div key={g.fase} className="flex items-center mb-5">
-                <div className="w-40 shrink-0 pr-3">
-                  <div className="font-bold text-sm" style={{ color: C.navy }}>{g.fase}</div>
-                  <div className="text-[11px]" style={{ color: C.gray }}>{g.ini} – {g.fim}</div>
-                </div>
-                <div className="relative flex-1 h-7">
-                  <div className="absolute h-7 rounded" style={{ left: `${left}%`, width: `${width}%`, background: "#fde2e2" }}>
-                    <div className="h-7 rounded flex items-center" style={{ width: `${g.pct}%`, background: C.red, minWidth: 34 }}>
-                      <span className="text-[11px] font-bold text-white px-2">{g.pct}%</span>
-                    </div>
+          {meses.length > 0 && (
+            <div className="mb-2">
+              <div className="relative h-4">
+                {meses.filter((m) => m.showAno).map((m, i) => (
+                  <div key={i} className="absolute text-[10px] font-semibold whitespace-nowrap" style={{ left: offset(m.pct), color: C.navyMed }}>{m.ano}</div>
+                ))}
+              </div>
+              <div className="relative h-5">
+                {meses.map((m, i) => (
+                  <div key={i} className="absolute text-[10px] capitalize whitespace-nowrap" style={{ left: offset(m.pct), color: C.gray, transform: i === meses.length - 1 ? "translateX(-100%)" : "translateX(0)" }}>{m.mes}</div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="relative">
+            {meses.map((m, i) => (
+              <div key={i} className="absolute top-0 bottom-0 w-px" style={{ left: offset(m.pct), background: C.border }} />
+            ))}
+            {fases.map((g) => {
+              const left = g.ini ? ((g.ini.getTime() - min) / range) * 100 : 0;
+              const width = g.ini ? ((g.fim.getTime() - g.ini.getTime()) / range) * 100 : 0;
+              return (
+                <div key={g.fase} className="relative flex items-center mb-5">
+                  <div className="w-40 shrink-0 pr-3">
+                    <div className="font-bold text-sm" style={{ color: C.navy }}>{g.fase}</div>
+                    {!g.ini && <div className="text-[11px]" style={{ color: C.gray }}>{g.temAcoes ? "sem datas" : "sem ações"}</div>}
+                  </div>
+                  <div className="relative flex-1 h-7">
+                    {g.ini && (
+                      <div className="absolute h-7 rounded" title={`${fmtBR(g.ini)} – ${fmtBR(g.fim)}`} style={{ left: `${left}%`, width: `${width}%`, background: "#dce3f7" }}>
+                        <div className="h-7 rounded flex items-center" style={{ width: `${g.pct}%`, background: C.blue, minWidth: 34 }}>
+                          <span className="text-[11px] font-bold text-white px-2">{g.pct}%</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
+              );
+            })}
+            {todayPct != null && (
+              <div className="absolute top-0 bottom-0" style={{ left: offset(todayPct) }}>
+                <div className="w-0.5 h-full" style={{ background: C.orange }} />
+                <div className="absolute -top-1 -translate-x-1/2 text-[9px] font-bold" style={{ color: C.orange }}>HOJE</div>
               </div>
-            );
-          })}
-          <div className="absolute top-0 bottom-0" style={{ left: `calc(160px + (100% - 160px) * ${todayPct / 100})` }}>
-            <div className="w-0.5 h-full" style={{ background: C.orange }} />
-            <div className="absolute -top-1 -translate-x-1/2 text-[9px] font-bold" style={{ color: C.orange }}>HOJE</div>
+            )}
           </div>
         </div>
+        )}
       </div>
     </div>
   );
@@ -2385,7 +2431,7 @@ export default function App() {
       case "portfolio": return <Portfolio projetos={projetos} openProject={openProject} />;
       case "mapa": return <MapaBrasil projetos={projetos} openProject={openProject} />;
       case "dashboard": return <Dashboard data={dashData} />;
-      case "gantt": return <>{nota}<Gantt project={project} /></>;
+      case "gantt": return <>{nota}<Gantt project={project} actions={acoesState.filter((a) => !a.projId || a.projId === project?.id)} /></>;
       case "acoes": return <BaseAcoes project={project} actions={acoesState} responsaveis={respState} onCreate={handleCreateAcao} onUpdate={handleUpdateAcao} onDelete={handleDeleteAcao} onDeleteMany={handleDeleteAcoes} onImport={handleImportAcoes} multi={multi} />;
       case "kanban": return <Kanban project={project} actions={acoesState} multi={multi} onMove={handleMoveAcao} />;
       case "followup": return <>{nota}<FollowUp project={project} actions={acoesState.filter((a) => !a.projId || a.projId === project?.id)} onSave={handleSaveFollowup} /></>;
